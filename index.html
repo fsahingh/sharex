@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Shared Expenses</title>
+<style>
+  :root{
+    --c-bg:#f2f2f7; --c-surface:#ffffff; --c-text:#1c1c1e; --c-text-2:#6e6e73;
+    --c-text-3:#a1a1a6; --c-tint:#0a84ff; --c-tint-bg:#e8f1ff;
+    --c-border:#e5e5ea; --c-success:#30d158; --c-danger:#ff3b30;
+    --r:16px; --r-sm:11px; --safe-t:env(safe-area-inset-top);
+    --safe-b:env(safe-area-inset-bottom);
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      --c-bg:#000000; --c-surface:#1c1c1e; --c-text:#ffffff; --c-text-2:#aeaeb2;
+      --c-text-3:#6e6e73; --c-tint:#0a84ff; --c-tint-bg:#0a2540;
+      --c-border:#38383a;
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--c-bg); color:var(--c-text);
+    display:flex; align-items:center; justify-content:center;
+    padding:24px; -webkit-font-smoothing:antialiased;
+  }
+  .card{
+    width:100%; max-width:380px; background:var(--c-surface);
+    border-radius:var(--r); padding:32px 24px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.10); text-align:center;
+  }
+  .icon{margin-bottom:16px;}
+  .icon svg{width:64px;height:64px;}
+  h1{font-size:22px;font-weight:700;margin-bottom:6px;}
+  .sub{font-size:14px;color:var(--c-text-2);line-height:1.5;margin-bottom:24px;}
+  label{display:block;text-align:left;font-size:12px;font-weight:600;
+    color:var(--c-text-2);margin-bottom:6px;}
+  input{
+    width:100%;padding:13px 14px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);background:var(--c-bg);color:var(--c-text);
+    font-size:16px;min-height:46px;-webkit-appearance:none;outline:none;
+  }
+  input:focus{border-color:var(--c-tint);box-shadow:0 0 0 3px rgba(10,132,255,0.15);}
+  button{
+    width:100%;padding:13px;border:none;border-radius:var(--r-sm);
+    background:var(--c-tint);color:#fff;font-size:15px;font-weight:600;
+    min-height:46px;margin-top:16px;cursor:pointer;transition:.15s;
+  }
+  button:active{opacity:.85;}
+  button:disabled{background:var(--c-border);color:var(--c-text-3);cursor:default;}
+  .msg{margin-top:16px;font-size:13px;line-height:1.5;padding:12px;
+    border-radius:var(--r-sm);display:none;}
+  .msg.show{display:block;}
+  .msg.ok{background:rgba(48,209,88,0.12);color:var(--c-success);}
+  .msg.err{background:rgba(255,59,48,0.10);color:var(--c-danger);}
+  .msg.info{background:var(--c-tint-bg);color:var(--c-tint);}
+  .signed-in{text-align:left;}
+  .row{display:flex;justify-content:space-between;padding:9px 0;
+    border-bottom:0.5px solid var(--c-border);font-size:14px;}
+  .row:last-child{border-bottom:none;}
+  .row .k{color:var(--c-text-2);}
+  .row .v{font-weight:600;}
+  .secondary{background:var(--c-bg);color:var(--c-text);
+    border:1px solid var(--c-border);}
+  .ver{margin-top:20px;font-size:11px;color:var(--c-text-3);opacity:.6;}
+  .spinner{width:22px;height:22px;border:2.5px solid var(--c-border);
+    border-top-color:var(--c-tint);border-radius:50%;
+    animation:spin .8s linear infinite;display:inline-block;vertical-align:middle;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <div class="icon">
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="32" r="31" fill="var(--c-tint-bg)"/>
+      <path d="M24 15h17a2 2 0 0 1 2 2v30l-4-2.8L35 47l-4-2.8L27 47l-4-2.8V17a2 2 0 0 1 2-2z" fill="var(--c-surface)" stroke="var(--c-tint)" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M27 24h11M27 30h11M27 36h7" stroke="var(--c-tint)" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div id="content"><div class="spinner"></div></div>
+  <div class="ver" id="ver"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function(){
+'use strict';
+
+// ============================================================
+//  CONFIG
+// ============================================================
+var APP_VERSION = 'V2-0.1';
+var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
+
+var sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+var $ = function(id){ return document.getElementById(id); };
+$('ver').textContent = 'Shared Expenses · ' + APP_VERSION;
+
+// ============================================================
+//  RENDER HELPERS
+// ============================================================
+function render(html){ $('content').innerHTML = html; }
+
+function showMsg(id, type, text){
+  var el = $(id);
+  if(!el) return;
+  el.className = 'msg show ' + type;
+  el.textContent = text;
+}
+
+// ============================================================
+//  SCREENS
+// ============================================================
+function showSignIn(){
+  render(
+    '<h1>Sign in</h1>' +
+    '<div class="sub">Enter your email and we\'ll send you a secure sign-in link. No password needed.</div>' +
+    '<label for="email">Email address</label>' +
+    '<input type="email" id="email" placeholder="you@example.com" autocomplete="email">' +
+    '<button id="send-btn">Send sign-in link</button>' +
+    '<div class="msg" id="msg"></div>'
+  );
+  var btn = $('send-btn');
+  var emailInput = $('email');
+  emailInput.focus();
+  btn.onclick = function(){ sendMagicLink(emailInput.value.trim()); };
+  emailInput.addEventListener('keydown', function(e){
+    if(e.key === 'Enter') sendMagicLink(emailInput.value.trim());
+  });
+}
+
+async function sendMagicLink(email){
+  if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    showMsg('msg', 'err', 'Please enter a valid email address.');
+    return;
+  }
+  var btn = $('send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  showMsg('msg', 'info', 'Sending your sign-in link…');
+  try{
+    var result = await sb.auth.signInWithOtp({
+      email: email,
+      options: {
+        // After the user clicks the email link they return to this page
+        emailRedirectTo: window.location.origin + window.location.pathname
+      }
+    });
+    if(result.error) throw result.error;
+    render(
+      '<h1>Check your email</h1>' +
+      '<div class="sub">We sent a sign-in link to<br><strong>' + escapeHtml(email) + '</strong><br><br>' +
+      'Open the email and tap the link to sign in. You can close this page.</div>' +
+      '<div class="msg show info">The link expires in 1 hour. Didn\'t get it? Check spam, or try again.</div>' +
+      '<button class="secondary" id="back-btn">Use a different email</button>'
+    );
+    $('back-btn').onclick = showSignIn;
+  }catch(err){
+    btn.disabled = false;
+    btn.textContent = 'Send sign-in link';
+    showMsg('msg', 'err', 'Could not send link: ' + (err.message || 'unknown error'));
+  }
+}
+
+async function showSignedIn(session){
+  // We're logged in. Fetch the profile row that the DB trigger created.
+  render('<div class="spinner"></div>');
+  var user = session.user;
+  var profile = null;
+  try{
+    var res = await sb.from('profiles').select('*').eq('id', user.id).single();
+    if(res.error) throw res.error;
+    profile = res.data;
+  }catch(err){
+    render(
+      '<h1>Signed in</h1>' +
+      '<div class="msg show err">Signed in, but could not load your profile: ' +
+      escapeHtml(err.message || '') + '</div>' +
+      '<button class="secondary" id="out-btn">Sign out</button>'
+    );
+    $('out-btn').onclick = signOut;
+    return;
+  }
+  var name = ((profile.first_name || '') + ' ' + (profile.last_name || '')).trim();
+  render(
+    '<h1>You\'re signed in</h1>' +
+    '<div class="sub">Magic link authentication is working. This is a test screen — the full app comes next.</div>' +
+    '<div class="signed-in">' +
+      '<div class="row"><span class="k">Email</span><span class="v">' + escapeHtml(profile.email) + '</span></div>' +
+      '<div class="row"><span class="k">Name</span><span class="v">' + (name ? escapeHtml(name) : '—') + '</span></div>' +
+      '<div class="row"><span class="k">Global admin</span><span class="v">' + (profile.is_global_admin ? 'Yes' : 'No') + '</span></div>' +
+      '<div class="row"><span class="k">User ID</span><span class="v" style="font-size:11px;">' + escapeHtml(user.id) + '</span></div>' +
+    '</div>' +
+    '<div class="msg show ok">Profile loaded successfully — the database, auth, and security policies all work.</div>' +
+    '<button class="secondary" id="out-btn">Sign out</button>'
+  );
+  $('out-btn').onclick = signOut;
+}
+
+async function signOut(){
+  render('<div class="spinner"></div>');
+  await sb.auth.signOut();
+  showSignIn();
+}
+
+function escapeHtml(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ============================================================
+//  BOOT
+// ============================================================
+async function boot(){
+  // getSession() also picks up the token from the magic-link redirect URL
+  var res = await sb.auth.getSession();
+  if(res.data && res.data.session){
+    showSignedIn(res.data.session);
+  }else{
+    showSignIn();
+  }
+  // React to auth changes (e.g. the moment the magic link completes)
+  sb.auth.onAuthStateChange(function(event, session){
+    if(session){ showSignedIn(session); }
+    else { showSignIn(); }
+  });
+}
+
+boot();
+
+})();
+</script>
+
+</body>
+</html>
