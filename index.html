@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Shared Expenses</title>
+<style>
+  :root{
+    --c-bg:#f2f2f7; --c-surface:#ffffff; --c-card:#ffffff;
+    --c-text:#1c1c1e; --c-text-2:#6e6e73; --c-text-3:#a1a1a6;
+    --c-tint:#0a84ff; --c-tint-bg:#e8f1ff;
+    --c-border:#e5e5ea; --c-success:#30d158; --c-danger:#ff3b30; --c-warn:#ff9500;
+    --r:16px; --r-sm:11px;
+    --shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04);
+    --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+    --header-h:52px;
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      --c-bg:#000000; --c-surface:#1c1c1e; --c-card:#1c1c1e;
+      --c-text:#ffffff; --c-text-2:#aeaeb2; --c-text-3:#6e6e73;
+      --c-tint:#0a84ff; --c-tint-bg:#0a2540;
+      --c-border:#38383a; --c-success:#30d158; --c-danger:#ff453a; --c-warn:#ff9f0a;
+      --shadow:0 1px 3px rgba(0,0,0,0.3);
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--c-bg); color:var(--c-text); -webkit-font-smoothing:antialiased;
+  }
+  [hidden]{display:none!important;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+  input{font-family:inherit;}
+
+  /* ---- AUTH SCREEN ---- */
+  .auth-wrap{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .auth-card{width:100%;max-width:380px;background:var(--c-surface);
+    border-radius:var(--r);padding:32px 24px;box-shadow:var(--shadow);text-align:center;}
+  .auth-icon{margin-bottom:16px;}
+  .auth-icon svg{width:60px;height:60px;}
+  .auth-card h1{font-size:22px;font-weight:700;margin-bottom:6px;}
+  .auth-sub{font-size:14px;color:var(--c-text-2);line-height:1.5;margin-bottom:24px;}
+  .auth-card label{display:block;text-align:left;font-size:12px;font-weight:600;
+    color:var(--c-text-2);margin-bottom:6px;}
+
+  input.field{width:100%;padding:13px 14px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);background:var(--c-bg);color:var(--c-text);
+    font-size:16px;min-height:46px;-webkit-appearance:none;outline:none;}
+  input.field:focus{border-color:var(--c-tint);box-shadow:0 0 0 3px rgba(10,132,255,0.15);}
+
+  .btn{width:100%;padding:13px;border-radius:var(--r-sm);font-size:15px;
+    font-weight:600;min-height:46px;transition:.15s;}
+  .btn-primary{background:var(--c-tint);color:#fff;}
+  .btn-primary:active{opacity:.85;}
+  .btn-primary:disabled{background:var(--c-border);color:var(--c-text-3);cursor:default;}
+  .btn-secondary{background:var(--c-bg);color:var(--c-text);border:1px solid var(--c-border);}
+
+  .msg{margin-top:16px;font-size:13px;line-height:1.5;padding:12px;
+    border-radius:var(--r-sm);display:none;}
+  .msg.show{display:block;}
+  .msg.ok{background:rgba(48,209,88,0.12);color:var(--c-success);}
+  .msg.err{background:rgba(255,59,48,0.10);color:var(--c-danger);}
+  .msg.info{background:var(--c-tint-bg);color:var(--c-tint);}
+
+  /* ---- APP SHELL ---- */
+  .header{position:sticky;top:0;z-index:90;height:calc(var(--header-h) + var(--safe-t));
+    padding-top:var(--safe-t);background:var(--c-surface);
+    border-bottom:0.5px solid var(--c-border);
+    display:flex;align-items:center;justify-content:space-between;
+    padding-left:16px;padding-right:8px;}
+  .header-title{font-size:18px;font-weight:700;}
+  .header-right{display:flex;align-items:center;gap:2px;}
+  .icon-btn{width:38px;height:38px;border-radius:9px;display:flex;
+    align-items:center;justify-content:center;color:var(--c-text);}
+  .icon-btn:active{background:var(--c-bg);}
+  .avatar{width:32px;height:32px;border-radius:50%;background:var(--c-tint);
+    color:#fff;font-size:13px;font-weight:700;display:flex;
+    align-items:center;justify-content:center;}
+
+  .content{padding:16px 16px 90px;max-width:540px;margin:0 auto;}
+
+  /* ---- TRIP CARDS ---- */
+  .trip-card{background:var(--c-card);border-radius:var(--r);margin-bottom:12px;
+    box-shadow:var(--shadow);overflow:hidden;}
+  .trip-card-row{display:flex;align-items:center;}
+  .trip-card-inner{flex:1;text-align:left;padding:15px 16px;min-width:0;}
+  .trip-card-name{font-size:16px;font-weight:700;}
+  .trip-card-sub{font-size:12px;color:var(--c-text-2);margin-top:2px;}
+  .trip-card-creator{font-size:11px;color:var(--c-tint);margin-top:3px;font-weight:500;}
+  .trip-card-right{display:flex;align-items:center;gap:10px;
+    padding-right:14px;flex-shrink:0;}
+  .pill{font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;}
+  .pill.even{background:var(--c-bg);color:var(--c-text-2);}
+  .pill.owed{background:rgba(48,209,88,0.15);color:var(--c-success);}
+  .pill.owe{background:rgba(255,59,48,0.13);color:var(--c-danger);}
+  .pill.settled{background:var(--c-bg);color:var(--c-text-3);}
+  .trip-lock{display:flex;align-items:center;flex-shrink:0;}
+  .trip-lock svg{width:18px;height:18px;}
+  .trip-lock.locked{color:var(--c-warn);}
+  .trip-lock.unlocked{color:var(--c-success);}
+
+  .empty{text-align:center;padding:60px 20px;}
+  .empty-title{font-size:16px;font-weight:600;margin-bottom:4px;}
+  .empty-sub{font-size:13px;color:var(--c-text-2);}
+
+  /* ---- FAB ---- */
+  .fab{position:fixed;right:20px;bottom:calc(20px + var(--safe-b));
+    width:56px;height:56px;border-radius:50%;background:var(--c-tint);color:#fff;
+    font-size:30px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 4px 16px rgba(10,132,255,0.4);z-index:80;}
+  .fab:active{opacity:.85;}
+
+  /* ---- MODAL ---- */
+  .modal{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;
+    justify-content:center;}
+  .modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.4);}
+  .modal-sheet{position:relative;width:100%;max-width:480px;max-height:88dvh;
+    background:var(--c-surface);border-radius:16px 16px 0 0;overflow-y:auto;
+    padding:0 20px calc(20px + var(--safe-b));animation:slideUp .25s ease-out;
+    display:flex;flex-direction:column;}
+  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .modal-handle{width:36px;height:4px;border-radius:2px;background:var(--c-text-3);
+    margin:10px auto 14px;opacity:.4;}
+  .modal-title{font-size:18px;font-weight:700;text-align:center;margin-bottom:16px;}
+  .modal-body{padding-bottom:12px;}
+  .modal-body label{display:block;font-size:12px;font-weight:600;
+    color:var(--c-text-2);margin-bottom:6px;margin-top:14px;}
+  .modal-body label:first-child{margin-top:0;}
+  .modal-actions{display:flex;gap:10px;padding-top:12px;position:sticky;bottom:0;
+    background:var(--c-surface);margin-top:auto;}
+  .modal-actions .btn{margin-top:0;flex:1;}
+
+  /* ---- MISC ---- */
+  .spinner{width:24px;height:24px;border:2.5px solid var(--c-border);
+    border-top-color:var(--c-tint);border-radius:50%;
+    animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .center-spin{min-height:60dvh;display:flex;align-items:center;justify-content:center;}
+  .toast{position:fixed;bottom:calc(90px + var(--safe-b));left:50%;
+    transform:translateX(-50%);background:var(--c-text);color:var(--c-bg);
+    padding:11px 18px;border-radius:22px;font-size:14px;font-weight:500;
+    z-index:300;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap;}
+  .toast.show{opacity:1;}
+  .toast.err{background:var(--c-danger);color:#fff;}
+  .ver{text-align:center;font-size:11px;color:var(--c-text-3);opacity:.6;
+    padding:20px 0 4px;}
+  .overlay-spin{position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:400;
+    display:flex;align-items:center;justify-content:center;}
+  .overlay-spin .box{background:var(--c-surface);border-radius:16px;
+    padding:24px 32px;display:flex;flex-direction:column;align-items:center;gap:12px;}
+  .overlay-spin .box .spinner{width:36px;height:36px;}
+  .overlay-spin .box .lbl{font-size:14px;font-weight:500;}
+</style>
+</head>
+<body>
+
+<!-- ======================= AUTH ======================= -->
+<div id="view-auth" class="auth-wrap" hidden>
+  <div class="auth-card">
+    <div class="auth-icon">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="31" fill="var(--c-tint-bg)"/>
+        <path d="M24 15h17a2 2 0 0 1 2 2v30l-4-2.8L35 47l-4-2.8L27 47l-4-2.8V17a2 2 0 0 1 2-2z" fill="var(--c-surface)" stroke="var(--c-tint)" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M27 24h11M27 30h11M27 36h7" stroke="var(--c-tint)" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div id="auth-content"></div>
+    <div class="ver" id="auth-ver"></div>
+  </div>
+</div>
+
+<!-- ======================= TRIPS ======================= -->
+<div id="view-trips" hidden>
+  <div class="header">
+    <span class="header-title">Trips</span>
+    <div class="header-right">
+      <button class="icon-btn" id="btn-account" title="Account">
+        <span class="avatar" id="avatar">?</span>
+      </button>
+    </div>
+  </div>
+  <div class="content" id="trips-content"></div>
+  <button class="fab" id="fab-new-trip" title="New trip">+</button>
+</div>
+
+<!-- ======================= NEW TRIP MODAL ======================= -->
+<div class="modal" id="modal-new-trip" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">New Trip</div>
+    <div class="modal-body">
+      <label for="nt-name">Trip name</label>
+      <input type="text" id="nt-name" class="field" placeholder="e.g. Weekend in Lisbon" maxlength="60">
+      <div class="msg" id="nt-msg"></div>
+      <div style="font-size:13px;color:var(--c-text-2);margin-top:14px;line-height:1.5;">
+        You'll be the trip admin. Add people and expenses once it's created.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="nt-cancel">Cancel</button>
+      <button class="btn btn-primary" id="nt-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= ACCOUNT MODAL ======================= -->
+<div class="modal" id="modal-account" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Account</div>
+    <div class="modal-body">
+      <div style="font-size:14px;color:var(--c-text-2);margin-bottom:4px;">Signed in as</div>
+      <div style="font-size:15px;font-weight:600;" id="acc-email"></div>
+      <div style="font-size:13px;color:var(--c-text-3);margin-top:2px;" id="acc-role"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="acc-close">Close</button>
+      <button class="btn btn-primary" id="acc-signout" style="background:var(--c-danger);">Sign Out</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function(){
+'use strict';
+
+// ============================================================
+//  CONFIG
+// ============================================================
+var APP_VERSION = 'V2-0.2';
+var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
+
+var sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================================
+//  STATE + HELPERS
+// ============================================================
+var state = { session:null, profile:null, trips:[] };
+var $ = function(id){ return document.getElementById(id); };
+function show(id){ $(id).hidden = false; }
+function hide(id){ $(id).hidden = true; }
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function money(n){
+  var v = Number(n)||0;
+  return (v<0?'-$':'$') + Math.abs(v).toFixed(2);
+}
+var toastTimer=null;
+function toast(text, isErr){
+  var t=$('toast'); t.textContent=text;
+  t.className='toast show'+(isErr?' err':'');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){ t.className='toast'; },2600);
+}
+var overlayEl=null;
+function overlay(label){
+  if(overlayEl) return;
+  overlayEl=document.createElement('div');
+  overlayEl.className='overlay-spin';
+  overlayEl.innerHTML='<div class="box"><div class="spinner"></div>'+
+    '<div class="lbl">'+esc(label||'Working…')+'</div></div>';
+  document.body.appendChild(overlayEl);
+}
+function overlayOff(){
+  if(overlayEl){ overlayEl.remove(); overlayEl=null; }
+}
+function openModal(id){ show(id); document.body.style.overflow='hidden'; }
+function closeModal(id){ hide(id); document.body.style.overflow=''; }
+
+// ============================================================
+//  AUTH SCREEN
+// ============================================================
+function renderAuthSignIn(){
+  $('auth-content').innerHTML =
+    '<h1>Sign in</h1>'+
+    '<div class="auth-sub">Enter your email and we\'ll send a secure sign-in link. No password needed.</div>'+
+    '<label for="email">Email address</label>'+
+    '<input type="email" id="email" class="field" placeholder="you@example.com" autocomplete="email">'+
+    '<button class="btn btn-primary" id="send-btn" style="margin-top:16px;">Send sign-in link</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  var emailInput=$('email');
+  emailInput.focus();
+  $('send-btn').onclick=function(){ sendMagicLink(emailInput.value.trim()); };
+  emailInput.addEventListener('keydown',function(e){
+    if(e.key==='Enter') sendMagicLink(emailInput.value.trim());
+  });
+}
+function setAuthMsg(type,text){
+  var m=$('auth-msg'); if(!m) return;
+  m.className='msg show '+type; m.textContent=text;
+}
+async function sendMagicLink(email){
+  if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    setAuthMsg('err','Please enter a valid email address.');
+    return;
+  }
+  var btn=$('send-btn');
+  btn.disabled=true; btn.textContent='Sending…';
+  setAuthMsg('info','Sending your sign-in link…');
+  try{
+    var res=await sb.auth.signInWithOtp({
+      email:email,
+      options:{ emailRedirectTo: window.location.origin+window.location.pathname }
+    });
+    if(res.error) throw res.error;
+    $('auth-content').innerHTML=
+      '<h1>Check your email</h1>'+
+      '<div class="auth-sub">We sent a sign-in link to<br><strong>'+esc(email)+'</strong><br><br>'+
+      'Open the email and tap the link to sign in.</div>'+
+      '<div class="msg show info">The link expires in 1 hour. No email? Check spam or try again.</div>'+
+      '<button class="btn btn-secondary" id="back-btn" style="margin-top:16px;">Use a different email</button>';
+    $('back-btn').onclick=renderAuthSignIn;
+  }catch(err){
+    btn.disabled=false; btn.textContent='Send sign-in link';
+    setAuthMsg('err','Could not send link: '+(err.message||'unknown error'));
+  }
+}
+
+// ============================================================
+//  TRIPS SCREEN
+// ============================================================
+async function loadTrips(){
+  $('trips-content').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res=await sb.rpc('list_my_trips');
+    if(res.error) throw res.error;
+    state.trips=res.data||[];
+    renderTrips();
+  }catch(err){
+    $('trips-content').innerHTML=
+      '<div class="empty"><div class="empty-title">Could not load trips</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+function renderTrips(){
+  var el=$('trips-content');
+  if(state.trips.length===0){
+    el.innerHTML=
+      '<div class="empty"><div class="empty-title">No trips yet</div>'+
+      '<div class="empty-sub">Tap + to create your first trip.</div></div>';
+    return;
+  }
+  var h='';
+  state.trips.forEach(function(t){
+    var net=Number(t.my_net)||0;
+    var pillCls='even', pillTxt='Even';
+    if(t.settled){ pillCls='settled'; pillTxt='Settled'; }
+    else if(net>0.01){ pillCls='owed'; pillTxt='+'+money(net).replace('-',''); }
+    else if(net<-0.01){ pillCls='owe'; pillTxt=money(net); }
+    var lock = t.settled
+      ? '<span class="trip-lock locked" title="Settled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>'
+      : '<span class="trip-lock unlocked" title="Active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></span>';
+    var creator='';
+    if(state.profile && state.profile.is_global_admin){
+      creator='<div class="trip-card-creator">Created by '+
+        (t.created_by_me?'you':esc(t.creator_name))+'</div>';
+    }
+    h+='<div class="trip-card">'+
+      '<div class="trip-card-row">'+
+        '<button class="trip-card-inner" data-trip="'+t.trip_id+'">'+
+          '<div class="trip-card-name">'+esc(t.name)+'</div>'+
+          '<div class="trip-card-sub">'+t.member_count+' '+
+            (t.member_count==1?'person':'people')+' &middot; '+
+            t.expense_count+' '+(t.expense_count==1?'expense':'expenses')+'</div>'+
+          creator+
+        '</button>'+
+        '<div class="trip-card-right">'+
+          '<span class="pill '+pillCls+'">'+pillTxt+'</span>'+
+          lock+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  });
+  el.innerHTML=h;
+  el.onclick=function(ev){
+    var card=ev.target.closest('[data-trip]');
+    if(card) openTrip(card.dataset.trip);
+  };
+}
+
+function openTrip(tripId){
+  // Trip detail screen comes in the next step.
+  toast('Trip detail screen coming next');
+}
+
+// ---- New trip ----
+function openNewTrip(){
+  $('nt-name').value='';
+  $('nt-msg').className='msg';
+  openModal('modal-new-trip');
+  setTimeout(function(){ $('nt-name').focus(); },150);
+}
+async function createTrip(){
+  var name=$('nt-name').value.trim();
+  if(!name){
+    $('nt-msg').className='msg show err';
+    $('nt-msg').textContent='Please enter a trip name.';
+    return;
+  }
+  overlay('Creating trip…');
+  try{
+    var res=await sb.rpc('create_trip',{ p_name:name });
+    if(res.error) throw res.error;
+    closeModal('modal-new-trip');
+    overlayOff();
+    toast('Trip created');
+    await loadTrips();
+  }catch(err){
+    overlayOff();
+    $('nt-msg').className='msg show err';
+    $('nt-msg').textContent=err.message||'Could not create trip.';
+  }
+}
+
+// ---- Account ----
+function openAccount(){
+  $('acc-email').textContent=state.profile?state.profile.email:'';
+  $('acc-role').textContent=state.profile&&state.profile.is_global_admin
+    ? 'Global administrator' : 'Member';
+  openModal('modal-account');
+}
+async function doSignOut(){
+  overlay('Signing out…');
+  await sb.auth.signOut();
+  overlayOff();
+  closeModal('modal-account');
+  // onAuthStateChange routes back to the auth screen
+}
+
+// ============================================================
+//  ROUTING
+// ============================================================
+async function enterApp(){
+  try{
+    var res=await sb.from('profiles').select('*')
+      .eq('id',state.session.user.id).single();
+    if(res.error) throw res.error;
+    state.profile=res.data;
+  }catch(err){
+    // Profile may lag right after first signup — retry once.
+    await new Promise(function(r){ setTimeout(r,800); });
+    var res2=await sb.from('profiles').select('*')
+      .eq('id',state.session.user.id).single();
+    state.profile=res2.data||{ email:state.session.user.email, is_global_admin:false };
+  }
+  var nm=((state.profile.first_name||'')+' '+(state.profile.last_name||'')).trim()
+    || state.profile.email;
+  $('avatar').textContent=(nm[0]||'?').toUpperCase();
+  hide('view-auth');
+  show('view-trips');
+  loadTrips();
+}
+function showAuth(){
+  hide('view-trips');
+  show('view-auth');
+  renderAuthSignIn();
+}
+
+// ============================================================
+//  WIRING
+// ============================================================
+$('auth-ver').textContent='Shared Expenses · '+APP_VERSION;
+$('fab-new-trip').onclick=openNewTrip;
+$('btn-account').onclick=openAccount;
+$('nt-cancel').onclick=function(){ closeModal('modal-new-trip'); };
+$('nt-create').onclick=createTrip;
+$('nt-name').addEventListener('keydown',function(e){
+  if(e.key==='Enter') createTrip();
+});
+$('acc-close').onclick=function(){ closeModal('modal-account'); };
+$('acc-signout').onclick=doSignOut;
+['modal-new-trip','modal-account'].forEach(function(id){
+  $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
+});
+
+// ============================================================
+//  BOOT
+// ============================================================
+async function boot(){
+  var res=await sb.auth.getSession();
+  state.session = (res.data && res.data.session) || null;
+  if(state.session){ enterApp(); }
+  else { showAuth(); }
+
+  sb.auth.onAuthStateChange(function(event,session){
+    var was = !!state.session;
+    state.session = session;
+    if(session && !was){ enterApp(); }
+    else if(!session && was){ showAuth(); }
+  });
+}
+boot();
+
+})();
+</script>
+
+</body>
+</html>
