@@ -263,7 +263,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-0.4';
+var APP_VERSION = 'V2-0.5';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -518,21 +518,31 @@ async function submitPin(pin){
   try{
     var res=await sb.rpc('verify_pin',{ p_pin:pin });
     if(res.error) throw res.error;
-    enterApp();
+    // verify_pin RETURNS a status string (it no longer throws for
+    // wrong/locked, so the attempt counter persists).
+    var result=String(res.data||'');
+    if(result==='ok'){
+      enterApp();
+      return;
+    }
+    btn.disabled=false; btn.textContent='Sign in';
+    if(result==='LOCKED'){
+      renderAuthLocked(null);
+    }else if(result.indexOf('WRONG:')===0){
+      var left=result.split('WRONG:')[1];
+      setAuthMsg('err','Incorrect PIN. '+left+' attempt'+(left==='1'?'':'s')+' left.');
+      $('pin').value='';
+      $('pin').focus();
+    }else if(result==='NO_PIN'){
+      renderAuthSetPin(false);
+    }else if(result.indexOf('ERR:')===0){
+      setAuthMsg('err',result.slice(4));
+    }else{
+      setAuthMsg('err','Could not verify PIN.');
+    }
   }catch(err){
     btn.disabled=false; btn.textContent='Sign in';
-    var m=err.message||'';
-    if(m.indexOf('LOCKED')>=0){
-      renderAuthLocked(null);
-    }else if(m.indexOf('WRONG:')>=0){
-      var left=m.split('WRONG:')[1];
-      setAuthMsg('err','Incorrect PIN. '+left+' attempt'+(left=='1'?'':'s')+' left.');
-      $('pin').value='';
-    }else if(m.indexOf('NO_PIN')>=0){
-      renderAuthSetPin(false);
-    }else{
-      setAuthMsg('err',m||'Could not verify PIN.');
-    }
+    setAuthMsg('err',err.message||'Could not verify PIN.');
   }
 }
 
