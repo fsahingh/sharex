@@ -237,11 +237,22 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-0.2';
+var APP_VERSION = 'V2-0.3';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
-var sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// persistSession keeps the login token in localStorage so closing and
+// reopening the page does NOT require signing in again. autoRefreshToken
+// renews it silently before it expires. detectSessionInUrl lets the magic
+// link complete the sign-in when the user lands back on the page.
+var sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: window.localStorage
+  }
+});
 
 // ============================================================
 //  STATE + HELPERS
