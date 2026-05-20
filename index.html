@@ -186,6 +186,45 @@
     flex-shrink:0;margin:0;}
   .ex-split-row-name{flex:1;font-size:14px;}
 
+  /* ---- SETTLEMENT TAB ---- */
+  .settle-summary{background:var(--c-card);border-radius:var(--r);padding:16px;
+    box-shadow:var(--shadow);margin-bottom:12px;}
+  .ss-row{display:flex;justify-content:space-between;gap:20px;}
+  .ss-lbl{font-size:11px;font-weight:600;color:var(--c-text-3);
+    text-transform:uppercase;letter-spacing:.3px;}
+  .ss-val{font-size:20px;font-weight:700;margin-top:2px;}
+  .ss-settled{margin-top:10px;font-size:13px;font-weight:600;color:var(--c-warn);
+    text-align:center;padding:6px;background:rgba(255,149,0,0.10);border-radius:8px;}
+
+  .settle-me{background:var(--c-card);border-radius:var(--r);padding:16px 18px;
+    box-shadow:var(--shadow);margin-bottom:12px;text-align:center;
+    border-left:4px solid var(--c-text-3);}
+  .settle-me.owed{border-left-color:var(--c-success);}
+  .settle-me.owe{border-left-color:var(--c-danger);}
+  .settle-me.even{border-left-color:var(--c-text-3);}
+  .sm-label{font-size:13px;color:var(--c-text-2);}
+  .sm-amount{font-size:28px;font-weight:700;margin-top:4px;}
+  .settle-me.owed .sm-amount{color:var(--c-success);}
+  .settle-me.owe  .sm-amount{color:var(--c-danger);}
+
+  .balance-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
+    box-shadow:var(--shadow);}
+  .bal-row{display:flex;align-items:center;gap:12px;padding:11px 14px;
+    border-bottom:0.5px solid var(--c-border);}
+  .bal-row:last-child{border-bottom:none;}
+  .bal-info{flex:1;min-width:0;}
+  .bal-name{font-size:14px;font-weight:600;}
+  .bal-sub{font-size:11px;color:var(--c-text-2);margin-top:1px;}
+
+  .transfer-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
+    box-shadow:var(--shadow);}
+  .transfer-row{display:flex;align-items:center;gap:10px;padding:12px 14px;
+    border-bottom:0.5px solid var(--c-border);font-size:14px;}
+  .transfer-row:last-child{border-bottom:none;}
+  .transfer-name{font-weight:500;}
+  .transfer-arrow{width:18px;height:18px;color:var(--c-text-3);flex-shrink:0;}
+  .transfer-amount{margin-left:auto;font-weight:700;color:var(--c-tint);}
+
   /* ---- TRIP CARDS ---- */
   .trip-card{background:var(--c-card);border-radius:var(--r);margin-bottom:12px;
     box-shadow:var(--shadow);overflow:hidden;}
@@ -296,7 +335,12 @@
     <button class="icon-btn" id="td-back" title="Back">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
-    <span class="header-title" id="td-name" style="flex:1;text-align:center;font-size:16px;margin-right:38px;"></span>
+    <span class="header-title" id="td-name" style="flex:1;text-align:center;font-size:16px;"></span>
+    <div class="header-right">
+      <button class="icon-btn" id="btn-account-2" title="Account">
+        <span class="avatar" id="avatar-2">?</span>
+      </button>
+    </div>
   </div>
   <div class="tabs">
     <button class="tab active" data-tab="settlement">
@@ -456,7 +500,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-0.8';
+var APP_VERSION = 'V2-0.9';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -879,7 +923,6 @@ function renderActiveTab(){
   if(state.activeTab==='people'){
     renderPeopleTab();
   }else if(state.activeTab==='expenses'){
-    // Expenses are loaded lazily on first visit
     if(!state.expensesLoadedFor || state.expensesLoadedFor !== state.trip.trip_id){
       state.expensesLoadedFor = state.trip.trip_id;
       loadExpenses();
@@ -887,7 +930,11 @@ function renderActiveTab(){
       renderExpensesTab();
     }
   }else if(state.activeTab==='settlement'){
-    renderSettlementTab();
+    if(!state.settlementLoadedFor || state.settlementLoadedFor !== state.trip.trip_id){
+      loadSettlement();
+    }else{
+      renderSettlementTab();
+    }
   }
   setActiveTab(state.activeTab);
 }
@@ -958,6 +1005,9 @@ async function reloadTrip(){
     var res=await sb.rpc('get_trip',{ p_trip:state.trip.trip_id });
     if(res.error) throw res.error;
     state.trip=res.data;
+    // Member changes can affect both expenses (split lookup) and settlement
+    state.expensesLoadedFor = null;
+    state.settlementLoadedFor = null;
     renderActiveTab();
   }catch(err){
     toast('Refresh failed',true);
@@ -1181,6 +1231,7 @@ async function saveExpense(){
     }
     closeModal('modal-expense');
     toast('Saved');
+    state.settlementLoadedFor = null;  // settlement is now stale
     await loadExpenses();
   }catch(err){
     setMsg(err.message||'Could not save.');
@@ -1198,6 +1249,7 @@ async function deleteExpense(){
     if(res.error) throw res.error;
     closeModal('modal-expense');
     toast('Deleted');
+    state.settlementLoadedFor = null;
     await loadExpenses();
   }catch(err){
     toast(err.message||'Could not delete',true);
@@ -1205,11 +1257,154 @@ async function deleteExpense(){
   btn.disabled=false;
 }
 
-// ----- Settlement placeholder -----
+// ----- Settlement tab -----
+state.settlement = null;
+state.settlementLoadedFor = null;
+
+async function loadSettlement(){
+  if(!state.trip) return;
+  $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res=await sb.rpc('get_trip_settlement',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    state.settlement = res.data;
+    state.settlementLoadedFor = state.trip.trip_id;
+    renderSettlementTab();
+  }catch(err){
+    $('tab-settlement').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load settlement</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
 function renderSettlementTab(){
-  $('tab-settlement').innerHTML =
-    '<div class="empty"><div class="empty-title">Settlement</div>'+
-    '<div class="empty-sub">Coming next — once expenses are in place.</div></div>';
+  var t=state.trip, s=state.settlement;
+  if(!t || !s){ return; }
+  var balances = s.balances || [];
+  var transfers = s.transfers || [];
+  var total = Number(s.total_cost)||0;
+  var memberCount = (t.members||[]).length;
+  var perPerson = memberCount>0 ? total/memberCount : 0;
+  var myDirId = t.my_directory_id;
+  var myBal = balances.find(function(b){ return b.directory_id===myDirId; });
+
+  var h='';
+
+  // --- Summary card: total + per-person ---
+  h += '<div class="settle-summary">'+
+    '<div class="ss-row">'+
+      '<div><div class="ss-lbl">Total cost</div>'+
+      '<div class="ss-val">'+money(total)+'</div></div>'+
+      '<div><div class="ss-lbl">Per person</div>'+
+      '<div class="ss-val">'+money(perPerson)+'</div></div>'+
+    '</div>'+
+    (t.settled ? '<div class="ss-settled">🔒 Settled</div>' : '')+
+    '</div>';
+
+  // --- My net (if I'm a member) ---
+  if(myBal){
+    var n = Number(myBal.net)||0;
+    var cls = (Math.abs(n) < 0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
+    var label = (Math.abs(n) < 0.005) ? 'You\'re even' :
+                (n>0 ? 'You\'re owed' : 'You owe');
+    h += '<div class="settle-me '+cls+'">'+
+      '<div class="sm-label">'+label+'</div>'+
+      '<div class="sm-amount">'+money(Math.abs(n))+'</div>'+
+      '</div>';
+  }
+
+  // --- Balances list ---
+  h += '<div class="tab-count">Balances</div>';
+  if(balances.length === 0){
+    h += '<div class="empty" style="padding:20px 0;"><div class="empty-sub">No members.</div></div>';
+  }else{
+    h += '<div class="balance-list">';
+    balances.forEach(function(b){
+      var n = Number(b.net)||0;
+      var bcls = (Math.abs(n)<0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
+      var btext = (Math.abs(n)<0.005) ? 'even' :
+                  (n>0 ? '+'+money(n).replace('-','') : money(n));
+      h += '<div class="bal-row">'+
+        '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
+          esc(((b.name||'?')[0]||'?').toUpperCase())+'</div>'+
+        '<div class="bal-info">'+
+          '<div class="bal-name">'+esc(b.name)+
+            (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+'</div>'+
+          '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.share)+'</div>'+
+        '</div>'+
+        '<span class="pill '+bcls+'">'+btext+'</span>'+
+        '</div>';
+    });
+    h += '</div>';
+  }
+
+  // --- Transfers (who pays whom) ---
+  if(transfers.length > 0){
+    h += '<div class="tab-count" style="margin-top:14px;">Who pays whom</div>';
+    h += '<div class="transfer-list">';
+    transfers.forEach(function(tr){
+      h += '<div class="transfer-row">'+
+        '<span class="transfer-name">'+esc(tr.from_name)+'</span>'+
+        '<svg class="transfer-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>'+
+        '<span class="transfer-name">'+esc(tr.to_name)+'</span>'+
+        '<span class="transfer-amount">'+money(tr.amount)+'</span>'+
+        '</div>';
+    });
+    h += '</div>';
+  }else if(total > 0){
+    h += '<div style="font-size:13px;color:var(--c-text-2);text-align:center;'+
+      'margin-top:14px;">Everyone is settled up.</div>';
+  }
+
+  // --- Admin actions: settle / unsettle ---
+  if(t.is_admin && total > 0){
+    if(t.settled){
+      h += '<div style="margin-top:20px;">'+
+        '<button class="btn btn-secondary" id="btn-unsettle" style="margin-top:0;">'+
+        '🔓 Reopen this trip</button></div>';
+    }else{
+      h += '<div style="margin-top:20px;">'+
+        '<button class="btn btn-primary" id="btn-settle" style="margin-top:0;background:var(--c-success);">'+
+        '🔒 Settle this trip</button></div>';
+    }
+  }
+
+  $('tab-settlement').innerHTML = h;
+  var bs = $('btn-settle'); if(bs) bs.onclick = doSettle;
+  var bu = $('btn-unsettle'); if(bu) bu.onclick = doUnsettle;
+}
+
+async function doSettle(){
+  if(!confirm('Settle this trip? This will lock all expenses and member changes.')) return;
+  overlay('Settling…');
+  try{
+    var res=await sb.rpc('settle_trip',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    await reloadTrip();
+    state.settlementLoadedFor=null;  // force settlement reload (settled flag changed)
+    await loadSettlement();
+    overlayOff();
+    toast('Trip settled');
+  }catch(err){
+    overlayOff();
+    toast(err.message||'Could not settle',true);
+  }
+}
+async function doUnsettle(){
+  if(!confirm('Reopen this trip? Expenses and members can be changed again.')) return;
+  overlay('Reopening…');
+  try{
+    var res=await sb.rpc('unsettle_trip',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    await reloadTrip();
+    state.settlementLoadedFor=null;
+    await loadSettlement();
+    overlayOff();
+    toast('Trip reopened');
+  }catch(err){
+    overlayOff();
+    toast(err.message||'Could not reopen',true);
+  }
 }
 
 // ----- Add Person modal -----
@@ -1376,7 +1571,9 @@ async function enterApp(){
   }
   var nm=((state.profile.first_name||'')+' '+(state.profile.last_name||'')).trim()
     || state.profile.email;
-  $('avatar').textContent=(nm[0]||'?').toUpperCase();
+  var initial=(nm[0]||'?').toUpperCase();
+  $('avatar').textContent=initial;
+  $('avatar-2').textContent=initial;
   hide('view-auth');
   show('view-trips');
   loadTrips();
@@ -1420,6 +1617,7 @@ async function resumeWithSession(){
 $('auth-ver').textContent='Shared Expenses · '+APP_VERSION;
 $('fab-new-trip').onclick=openNewTrip;
 $('btn-account').onclick=openAccount;
+$('btn-account-2').onclick=openAccount;
 $('nt-cancel').onclick=function(){ closeModal('modal-new-trip'); };
 $('nt-create').onclick=createTrip;
 $('nt-name').addEventListener('keydown',function(e){
