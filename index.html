@@ -514,7 +514,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-1.5';
+var APP_VERSION = 'V2-1.6';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -701,15 +701,32 @@ async function verifyOtp(code){
       return;
     }
 
-    // New-device / first-time setup OTP. We just signed the user in.
-    // Check the OWN profile directly (RLS allows reading own row) — this
-    // is more reliable than pin_status during the auth-state transition.
+    // verifyOtp returns a session, but the JS client may take a beat to
+    // wire that token into subsequent requests. If we query profiles
+    // immediately we sometimes hit RLS as anon and get an empty result —
+    // which would wrongly send a returning user to PIN setup.
+    // Fix: poll a few times with a short delay until the query succeeds.
     var hasPin = false;
-    try{
-      var pr = await sb.from('profiles')
-        .select('pin_hash').eq('id', res.data.session.user.id).single();
-      if(!pr.error && pr.data) hasPin = (pr.data.pin_hash != null);
-    }catch(e){ /* fall through */ }
+    var profileFound = false;
+    for(var attempt=0; attempt<5; attempt++){
+      try{
+        var pr = await sb.from('profiles')
+          .select('pin_hash').eq('id', res.data.session.user.id).single();
+        if(!pr.error && pr.data){
+          hasPin = (pr.data.pin_hash != null);
+          profileFound = true;
+          break;
+        }
+      }catch(e){ /* try again */ }
+      await new Promise(function(r){ setTimeout(r, 200); });
+    }
+    if(!profileFound){
+      // Couldn't read the profile after several tries. Safest bet: let
+      // them into the app. If they truly have no PIN they can add one
+      // from "Change my PIN" later.
+      enterApp();
+      return;
+    }
     if(hasPin){
       enterApp();
     }else{
