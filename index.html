@@ -187,25 +187,38 @@
   .ex-split-row-name{flex:1;font-size:14px;}
 
   /* ---- SETTLEMENT TAB ---- */
-  .settle-summary{background:var(--c-card);border-radius:var(--r);padding:16px;
-    box-shadow:var(--shadow);margin-bottom:12px;}
-  .ss-row{display:flex;justify-content:space-between;gap:20px;}
+  .settle-summary{background:var(--c-card);border-radius:var(--r);
+    box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden;}
+  .ss-grid{display:grid;grid-template-columns:1fr auto 1fr;
+    align-items:center;padding:14px 12px;gap:6px;}
+  .ss-cell{text-align:center;padding:0 4px;}
   .ss-lbl{font-size:11px;font-weight:600;color:var(--c-text-3);
     text-transform:uppercase;letter-spacing:.3px;}
-  .ss-val{font-size:20px;font-weight:700;margin-top:2px;}
-  .ss-settled{margin-top:10px;font-size:13px;font-weight:600;color:var(--c-warn);
-    text-align:center;padding:6px;background:rgba(255,149,0,0.10);border-radius:8px;}
+  .ss-val{font-size:22px;font-weight:700;margin-top:2px;}
+  .ss-lock{display:flex;flex-direction:column;align-items:center;gap:4px;
+    padding:6px 14px;border-radius:14px;color:var(--c-text-3);
+    border:1px solid transparent;min-width:80px;}
+  .ss-lock-icon{display:flex;align-items:center;justify-content:center;}
+  .ss-lock-icon svg{width:32px;height:32px;}
+  .ss-lock-hint{font-size:10px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.3px;text-align:center;}
+  .ss-lock.unlocked{color:var(--c-success);}
+  .ss-lock.locked{color:var(--c-warn);background:rgba(255,149,0,0.08);}
+  .ss-lock.tappable{cursor:pointer;}
+  .ss-lock.tappable:active{transform:scale(0.96);}
 
-  .settle-me{background:var(--c-card);border-radius:var(--r);padding:16px 18px;
-    box-shadow:var(--shadow);margin-bottom:12px;text-align:center;
+  /* "You paid" + "Your net" side-by-side */
+  .my-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+  .my-card{background:var(--c-card);border-radius:var(--r);padding:14px 16px;
+    box-shadow:var(--shadow);text-align:center;
     border-left:4px solid var(--c-text-3);}
-  .settle-me.owed{border-left-color:var(--c-success);}
-  .settle-me.owe{border-left-color:var(--c-danger);}
-  .settle-me.even{border-left-color:var(--c-text-3);}
-  .sm-label{font-size:13px;color:var(--c-text-2);}
-  .sm-amount{font-size:28px;font-weight:700;margin-top:4px;}
-  .settle-me.owed .sm-amount{color:var(--c-success);}
-  .settle-me.owe  .sm-amount{color:var(--c-danger);}
+  .my-card.owed{border-left-color:var(--c-success);}
+  .my-card.owe{border-left-color:var(--c-danger);}
+  .my-card.even{border-left-color:var(--c-text-3);}
+  .my-lbl{font-size:12px;color:var(--c-text-2);}
+  .my-amt{font-size:22px;font-weight:700;margin-top:3px;}
+  .my-card.owed .my-amt{color:var(--c-success);}
+  .my-card.owe  .my-amt{color:var(--c-danger);}
 
   .balance-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
     box-shadow:var(--shadow);}
@@ -222,6 +235,7 @@
     border-bottom:0.5px solid var(--c-border);font-size:14px;}
   .transfer-row:last-child{border-bottom:none;}
   .transfer-name{font-weight:500;}
+  .transfer-name.me{color:var(--c-tint);font-weight:700;}
   .transfer-arrow{width:18px;height:18px;color:var(--c-text-3);flex-shrink:0;}
   .transfer-amount{margin-left:auto;font-weight:700;color:var(--c-tint);}
 
@@ -500,7 +514,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-1.0';
+var APP_VERSION = 'V2-1.1';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1287,91 +1301,105 @@ function renderSettlementTab(){
   var perPerson = memberCount>0 ? total/memberCount : 0;
   var myDirId = t.my_directory_id;
   var myBal = balances.find(function(b){ return b.directory_id===myDirId; });
+  var callerAdmin = !!s.caller_is_admin;
 
   var h='';
 
-  // --- Summary card: total + per-person ---
+  // --- Summary card: total + per-person, with center lock toggle ---
+  // Lock icon goes in the middle column. Active trip = open-padlock (green)
+  // = click to settle. Settled trip = closed-padlock (orange) = click to reopen.
+  // Non-admins see the icon but it isn't clickable.
+  var lockSvg = t.settled
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>';
+  var lockState = t.settled ? 'locked' : 'unlocked';
+  var lockHint = t.is_admin
+    ? (t.settled ? 'Tap to reopen' : 'Tap to settle')
+    : (t.settled ? 'Trip is settled' : 'Trip is active');
+  var lockAttr = (t.is_admin && total>0) ? ' id="settle-toggle" role="button"' : '';
+
   h += '<div class="settle-summary">'+
-    '<div class="ss-row">'+
-      '<div><div class="ss-lbl">Total cost</div>'+
-      '<div class="ss-val">'+money(total)+'</div></div>'+
-      '<div><div class="ss-lbl">Per person</div>'+
-      '<div class="ss-val">'+money(perPerson)+'</div></div>'+
+    '<div class="ss-grid">'+
+      '<div class="ss-cell"><div class="ss-lbl">Total cost</div>'+
+        '<div class="ss-val">'+money(total)+'</div></div>'+
+      '<div class="ss-lock '+lockState+(t.is_admin&&total>0?' tappable':'')+'"'+lockAttr+'>'+
+        '<div class="ss-lock-icon">'+lockSvg+'</div>'+
+        '<div class="ss-lock-hint">'+esc(lockHint)+'</div>'+
+      '</div>'+
+      '<div class="ss-cell"><div class="ss-lbl">Per person</div>'+
+        '<div class="ss-val">'+money(perPerson)+'</div></div>'+
     '</div>'+
-    (t.settled ? '<div class="ss-settled">🔒 Settled</div>' : '')+
     '</div>';
 
-  // --- My net (if I'm a member) ---
+  // --- "You paid" + "Your net" side-by-side ---
   if(myBal){
     var n = Number(myBal.net)||0;
-    var cls = (Math.abs(n) < 0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
-    var label = (Math.abs(n) < 0.005) ? 'You\'re even' :
-                (n>0 ? 'You\'re owed' : 'You owe');
-    h += '<div class="settle-me '+cls+'">'+
-      '<div class="sm-label">'+label+'</div>'+
-      '<div class="sm-amount">'+money(Math.abs(n))+'</div>'+
+    var ncls = (Math.abs(n) < 0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
+    var nlbl = (Math.abs(n) < 0.005) ? 'You\'re even' :
+               (n>0 ? 'You\'re owed' : 'You owe');
+    h += '<div class="my-row">'+
+      '<div class="my-card"><div class="my-lbl">You paid</div>'+
+        '<div class="my-amt">'+money(Number(myBal.paid)||0)+'</div></div>'+
+      '<div class="my-card '+ncls+'"><div class="my-lbl">'+nlbl+'</div>'+
+        '<div class="my-amt">'+money(Math.abs(n))+'</div></div>'+
       '</div>';
   }
 
-  // --- Balances list ---
-  h += '<div class="tab-count">Balances</div>';
-  if(balances.length === 0){
-    h += '<div class="empty" style="padding:20px 0;"><div class="empty-sub">No members.</div></div>';
-  }else{
-    h += '<div class="balance-list">';
-    balances.forEach(function(b){
-      var n = Number(b.net)||0;
-      var bcls = (Math.abs(n)<0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
-      var btext = (Math.abs(n)<0.005) ? 'even' :
-                  (n>0 ? '+'+money(n).replace('-','') : money(n));
-      h += '<div class="bal-row">'+
-        '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
-          esc(((b.name||'?')[0]||'?').toUpperCase())+'</div>'+
-        '<div class="bal-info">'+
-          '<div class="bal-name">'+esc(b.name)+
-            (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+'</div>'+
-          '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.share)+'</div>'+
-        '</div>'+
-        '<span class="pill '+bcls+'">'+btext+'</span>'+
-        '</div>';
-    });
-    h += '</div>';
+  // --- Balances list (admins only, OR your own row for non-admins) ---
+  if(callerAdmin){
+    h += '<div class="tab-count">Balances</div>';
+    if(balances.length === 0){
+      h += '<div class="empty" style="padding:20px 0;"><div class="empty-sub">No members.</div></div>';
+    }else{
+      h += '<div class="balance-list">';
+      balances.forEach(function(b){
+        var bn = Number(b.net)||0;
+        var bcls = (Math.abs(bn)<0.005) ? 'even' : (bn>0 ? 'owed' : 'owe');
+        var btext = (Math.abs(bn)<0.005) ? 'even' :
+                    (bn>0 ? '+'+money(bn).replace('-','') : money(bn));
+        h += '<div class="bal-row">'+
+          '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
+            esc(((b.name||'?')[0]||'?').toUpperCase())+'</div>'+
+          '<div class="bal-info">'+
+            '<div class="bal-name">'+esc(b.name)+
+              (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+'</div>'+
+            '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.share)+'</div>'+
+          '</div>'+
+          '<span class="pill '+bcls+'">'+btext+'</span>'+
+          '</div>';
+      });
+      h += '</div>';
+    }
   }
 
-  // --- Transfers (who pays whom) ---
+  // --- Transfers ---
+  // Admin sees all. Non-admin only sees transfers involving themselves
+  // (backend already filtered).
   if(transfers.length > 0){
-    h += '<div class="tab-count" style="margin-top:14px;">Who pays whom</div>';
+    var label = callerAdmin ? 'Who pays whom' : 'Your settlements';
+    h += '<div class="tab-count" style="margin-top:14px;">'+label+'</div>';
     h += '<div class="transfer-list">';
     transfers.forEach(function(tr){
+      var fromMe = tr.from_id === myDirId;
+      var toMe   = tr.to_id   === myDirId;
       h += '<div class="transfer-row">'+
-        '<span class="transfer-name">'+esc(tr.from_name)+'</span>'+
+        '<span class="transfer-name'+(fromMe?' me':'')+'">'+esc(tr.from_name)+
+          (fromMe?' (You)':'')+'</span>'+
         '<svg class="transfer-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>'+
-        '<span class="transfer-name">'+esc(tr.to_name)+'</span>'+
+        '<span class="transfer-name'+(toMe?' me':'')+'">'+esc(tr.to_name)+
+          (toMe?' (You)':'')+'</span>'+
         '<span class="transfer-amount">'+money(tr.amount)+'</span>'+
         '</div>';
     });
     h += '</div>';
-  }else if(total > 0){
+  }else if(total > 0 && myBal && Math.abs(Number(myBal.net)||0) < 0.005){
     h += '<div style="font-size:13px;color:var(--c-text-2);text-align:center;'+
-      'margin-top:14px;">Everyone is settled up.</div>';
-  }
-
-  // --- Admin actions: settle / unsettle ---
-  if(t.is_admin && total > 0){
-    if(t.settled){
-      h += '<div style="margin-top:20px;">'+
-        '<button class="btn btn-secondary" id="btn-unsettle" style="margin-top:0;">'+
-        '🔓 Reopen this trip</button></div>';
-    }else{
-      h += '<div style="margin-top:20px;">'+
-        '<button class="btn btn-primary" id="btn-settle" style="margin-top:0;background:var(--c-success);">'+
-        '🔒 Settle this trip</button></div>';
-    }
+      'margin-top:14px;">You\'re all settled up.</div>';
   }
 
   $('tab-settlement').innerHTML = h;
-  var bs = $('btn-settle'); if(bs) bs.onclick = doSettle;
-  var bu = $('btn-unsettle'); if(bu) bu.onclick = doUnsettle;
+  var toggle = $('settle-toggle');
+  if(toggle) toggle.onclick = t.settled ? doUnsettle : doSettle;
 }
 
 async function doSettle(){
