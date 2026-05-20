@@ -48,10 +48,18 @@
   .auth-card label{display:block;text-align:left;font-size:12px;font-weight:600;
     color:var(--c-text-2);margin-bottom:6px;}
 
-  input.field{width:100%;padding:13px 14px;border:1px solid var(--c-border);
+  input.field, select.field, textarea.field{
+    width:100%;padding:13px 14px;border:1px solid var(--c-border);
     border-radius:var(--r-sm);background:var(--c-bg);color:var(--c-text);
-    font-size:16px;min-height:46px;-webkit-appearance:none;outline:none;}
-  input.field:focus{border-color:var(--c-tint);box-shadow:0 0 0 3px rgba(10,132,255,0.15);}
+    font-size:16px;min-height:46px;-webkit-appearance:none;-moz-appearance:none;
+    appearance:none;outline:none;font-family:inherit;}
+  input.field:focus, select.field:focus, textarea.field:focus{
+    border-color:var(--c-tint);box-shadow:0 0 0 3px rgba(10,132,255,0.15);}
+  /* Custom chevron for select since we removed the native one */
+  select.field{
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 14px center;
+    padding-right:38px;}
 
   .btn{width:100%;padding:13px;border-radius:var(--r-sm);font-size:15px;
     font-weight:600;min-height:46px;transition:.15s;}
@@ -152,24 +160,30 @@
   .exp-chevron.open{transform:rotate(180deg);}
   .exp-split-panel{padding:0 14px 14px;border-top:0.5px solid var(--c-border);}
   .exp-split-head{font-size:11px;font-weight:600;color:var(--c-text-3);
-    text-transform:uppercase;letter-spacing:.3px;padding:10px 0 6px;}
-  .exp-split-line{display:flex;justify-content:space-between;align-items:center;
-    padding:6px 0;font-size:14px;}
-  .exp-split-line .sub{color:var(--c-text-2);font-size:13px;}
+    text-transform:uppercase;letter-spacing:.3px;padding:10px 0 4px;}
+  .exp-split-per-person{font-size:13px;font-weight:600;color:var(--c-tint);
+    padding:2px 0 8px;}
+  .exp-split-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;
+    padding:2px 0;}
+  .exp-split-cell{font-size:14px;padding:4px 0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;}
 
   /* ---- EXPENSE MODAL — split list ---- */
   .ex-split-mode{display:flex;gap:8px;margin-top:4px;}
-  .ex-radio{flex:1;display:flex;align-items:center;justify-content:center;
-    gap:6px;padding:9px;border:1px solid var(--c-border);border-radius:var(--r-sm);
-    background:var(--c-bg);font-size:13px;font-weight:500;cursor:pointer;}
-  .ex-radio input{margin:0;accent-color:var(--c-tint);}
+  .ex-radio{flex:1 1 0;display:flex;align-items:center;justify-content:center;
+    gap:8px;padding:11px 12px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);background:var(--c-bg);
+    font-size:14px;font-weight:500;cursor:pointer;min-height:46px;
+    box-sizing:border-box;}
+  .ex-radio input{margin:0;width:16px;height:16px;flex-shrink:0;accent-color:var(--c-tint);}
   .ex-radio:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);color:var(--c-tint);}
   #ex-split-list{margin-top:10px;border:1px solid var(--c-border);
     border-radius:var(--r-sm);max-height:240px;overflow-y:auto;}
-  .ex-split-row{display:flex;align-items:center;gap:10px;padding:10px 12px;
-    border-bottom:0.5px solid var(--c-border);}
+  .ex-split-row{display:flex;align-items:center;gap:12px;padding:10px 14px;
+    border-bottom:0.5px solid var(--c-border);cursor:pointer;}
   .ex-split-row:last-child{border-bottom:none;}
-  .ex-split-row input{width:20px;height:20px;accent-color:var(--c-tint);flex-shrink:0;}
+  .ex-split-row input{width:20px;height:20px;accent-color:var(--c-tint);
+    flex-shrink:0;margin:0;}
   .ex-split-row-name{flex:1;font-size:14px;}
 
   /* ---- TRIP CARDS ---- */
@@ -442,7 +456,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-0.7';
+var APP_VERSION = 'V2-0.8';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1003,15 +1017,15 @@ function renderExpensesTab(){
       '</button>';
     if(open){
       h += '<div class="exp-split-panel">'+
-        '<div class="exp-split-head">Split between</div>';
+        '<div class="exp-split-head">Split between '+splitIds.length+'</div>'+
+        '<div class="exp-split-per-person">'+money(perPerson)+' per person</div>'+
+        '<div class="exp-split-grid">';
       splitIds.forEach(function(sid){
-        h += '<div class="exp-split-line">'+
-          '<span>'+esc(nameById[sid]||'Unknown')+'</span>'+
-          '<span class="sub">'+money(perPerson)+'</span>'+
-          '</div>';
+        h += '<div class="exp-split-cell">'+esc(nameById[sid]||'Unknown')+'</div>';
       });
+      h += '</div>';
       if(t.is_admin && !t.settled){
-        h += '<div style="display:flex;gap:8px;margin-top:10px;">'+
+        h += '<div style="display:flex;gap:8px;margin-top:12px;">'+
           '<button class="btn btn-secondary" data-edit="'+e.expense_id+'" style="margin-top:0;">Edit</button>'+
           '</div>';
       }
@@ -1094,13 +1108,25 @@ function openExpenseModal(expenseId){
     }
     $('ex-delete').hidden = !(t.is_admin);
     state.expenseOriginal = JSON.stringify(readExpenseForm());
+    // Edit mode: Save starts disabled — only enabled when something changes
+    $('ex-save').textContent = 'Apply Changes';
+    $('ex-save').disabled = true;
   }else{
     // ADD mode
     $('ex-title').textContent = 'Add Expense';
     $('ex-desc').value=''; $('ex-amount').value=''; $('ex-paid-by').value='';
     $('ex-delete').hidden = true;
+    $('ex-save').textContent = 'Save';
+    $('ex-save').disabled = false;
   }
   openModal('modal-expense');
+}
+
+// Recomputes whether the form differs from the original; toggles Save.
+function checkExpenseChanged(){
+  if(!state.expenseEditingId || !state.expenseOriginal) return;
+  var now = JSON.stringify(readExpenseForm());
+  $('ex-save').disabled = (now === state.expenseOriginal);
 }
 
 function readExpenseForm(){
@@ -1415,6 +1441,12 @@ $('cp-new2').addEventListener('keydown',function(e){
 $('ex-cancel').onclick = function(){ closeModal('modal-expense'); };
 $('ex-save').onclick   = saveExpense;
 $('ex-delete').onclick = deleteExpense;
+// In edit mode, the Save button stays disabled until the form really changes.
+['ex-desc','ex-amount','ex-paid-by'].forEach(function(id){
+  $(id).addEventListener('input', checkExpenseChanged);
+  $(id).addEventListener('change', checkExpenseChanged);
+});
+$('ex-split-list').addEventListener('change', checkExpenseChanged);
 document.querySelectorAll('input[name="ex-split"]').forEach(function(r){
   r.onchange = function(){
     $('ex-split-list').hidden = (r.value !== 'custom') || !r.checked;
@@ -1423,6 +1455,7 @@ document.querySelectorAll('input[name="ex-split"]').forEach(function(r){
     }else{
       $('ex-split-list').hidden = true;
     }
+    checkExpenseChanged();
   };
 });
 
