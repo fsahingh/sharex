@@ -1,132 +1,1727 @@
--- ============================================================
---  FIX — get_trip_settlement: ambiguous "id" column (v2)
---  Run once in Supabase → SQL Editor.
--- ============================================================
--- Bug:
---   The previous version did jsonb_to_recordset(...) + a lateral select
---   that re-projected "id", "name", "net" alongside columns that already
---   carried those names from the source. Postgres complained:
---     column reference "id" is ambiguous
---
--- Fix:
---   Skip the JSON round-trip entirely. Compute paid/share/net in a CTE
---   and read it straight into parallel arrays for the greedy transfer
---   loop. Cleaner and faster.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Shared Expenses</title>
+<style>
+  :root{
+    --c-bg:#f2f2f7; --c-surface:#ffffff; --c-card:#ffffff;
+    --c-text:#1c1c1e; --c-text-2:#6e6e73; --c-text-3:#a1a1a6;
+    --c-tint:#0a84ff; --c-tint-bg:#e8f1ff;
+    --c-border:#e5e5ea; --c-success:#30d158; --c-danger:#ff3b30; --c-warn:#ff9500;
+    --r:16px; --r-sm:11px;
+    --shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.04);
+    --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+    --header-h:52px;
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      --c-bg:#000000; --c-surface:#1c1c1e; --c-card:#1c1c1e;
+      --c-text:#ffffff; --c-text-2:#aeaeb2; --c-text-3:#6e6e73;
+      --c-tint:#0a84ff; --c-tint-bg:#0a2540;
+      --c-border:#38383a; --c-success:#30d158; --c-danger:#ff453a; --c-warn:#ff9f0a;
+      --shadow:0 1px 3px rgba(0,0,0,0.3);
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--c-bg); color:var(--c-text); -webkit-font-smoothing:antialiased;
+  }
+  [hidden]{display:none!important;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+  input{font-family:inherit;}
 
-create or replace function public.get_trip_settlement(p_trip uuid)
-returns jsonb
-language plpgsql
-security definer set search_path = public
-as $$
-declare
-  v_uid     uuid := auth.uid();
-  v_total   numeric := 0;
-  v_balances jsonb;
-  v_transfers jsonb := '[]'::jsonb;
-  arr_id   uuid[];
-  arr_name text[];
-  arr_net  numeric[];
-  i int; j int; n int;
-  v_amt numeric;
-  v_eps numeric := 0.005;   -- treat sub-cent residuals as zero
-begin
-  if v_uid is null then raise exception 'Not signed in.'; end if;
-  if not public.is_global_admin() and not public.is_trip_member(p_trip) then
-    raise exception 'No access to this trip.';
-  end if;
+  /* ---- AUTH SCREEN ---- */
+  .auth-wrap{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .auth-card{width:100%;max-width:380px;background:var(--c-surface);
+    border-radius:var(--r);padding:32px 24px;box-shadow:var(--shadow);text-align:center;}
+  .auth-icon{margin-bottom:16px;}
+  .auth-icon svg{width:60px;height:60px;}
+  .auth-card h1{font-size:22px;font-weight:700;margin-bottom:6px;}
+  .auth-sub{font-size:14px;color:var(--c-text-2);line-height:1.5;margin-bottom:24px;}
+  .auth-card label{display:block;text-align:left;font-size:12px;font-weight:600;
+    color:var(--c-text-2);margin-bottom:6px;}
 
-  -- Build paid / share / net per trip member, in ONE pass, then read it
-  -- into both the JSON output AND parallel arrays for the transfer loop.
-  create temp table tmp_bals on commit drop as
-  with
-    members as (
-      select tm.directory_id as id,
-             coalesce(nullif(trim(d.first_name||' '||d.last_name),''), d.email, 'Unnamed') as name
-      from public.trip_members tm
-      join public.directory d on d.id = tm.directory_id
-      where tm.trip_id = p_trip
-    ),
-    paid as (
-      select e.paid_by as id, sum(e.amount) as amt
-      from public.expenses e
-      where e.trip_id = p_trip and e.status = 'active'
-      group by e.paid_by
-    ),
-    share as (
-      select es.directory_id as id,
-             sum(e.amount / nullif((
-               select count(*) from public.expense_splits s where s.expense_id = e.id
-             ),0)) as amt
-      from public.expense_splits es
-      join public.expenses e on e.id = es.expense_id
-      where e.trip_id = p_trip and e.status = 'active'
-      group by es.directory_id
-    )
-  select
-    m.id   as dir_id,
-    m.name as dir_name,
-    round(coalesce(p.amt,0)::numeric, 2)  as paid,
-    round(coalesce(s.amt,0)::numeric, 2)  as share,
-    round((coalesce(p.amt,0) - coalesce(s.amt,0))::numeric, 2) as net
-  from members m
-  left join paid  p on p.id = m.id
-  left join share s on s.id = m.id;
+  input.field, select.field, textarea.field{
+    width:100%;padding:13px 14px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);background:var(--c-bg);color:var(--c-text);
+    font-size:16px;min-height:46px;-webkit-appearance:none;-moz-appearance:none;
+    appearance:none;outline:none;font-family:inherit;}
+  input.field:focus, select.field:focus, textarea.field:focus{
+    border-color:var(--c-tint);box-shadow:0 0 0 3px rgba(10,132,255,0.15);}
+  /* Custom chevron for select since we removed the native one */
+  select.field{
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 14px center;
+    padding-right:38px;}
 
-  -- Trip total
-  select coalesce(sum(amount),0)::numeric into v_total
-    from public.expenses
-    where trip_id = p_trip and status = 'active';
+  .btn{width:100%;padding:13px;border-radius:var(--r-sm);font-size:15px;
+    font-weight:600;min-height:46px;transition:.15s;}
+  .btn-primary{background:var(--c-tint);color:#fff;}
+  .btn-primary:active{opacity:.85;}
+  .btn-primary:disabled{background:var(--c-border);color:var(--c-text-3);cursor:default;}
+  .btn-secondary{background:var(--c-bg);color:var(--c-text);border:1px solid var(--c-border);}
 
-  -- Balances JSON (sorted: biggest creditors first looks nicer in UI)
-  select coalesce(jsonb_agg(jsonb_build_object(
-    'directory_id', dir_id,
-    'name',         dir_name,
-    'paid',         paid,
-    'share',        share,
-    'net',          net
-  ) order by net desc), '[]'::jsonb)
-    into v_balances
-  from tmp_bals;
+  .msg{margin-top:16px;font-size:13px;line-height:1.5;padding:12px;
+    border-radius:var(--r-sm);display:none;}
+  .msg.show{display:block;}
+  .msg.ok{background:rgba(48,209,88,0.12);color:var(--c-success);}
+  .msg.err{background:rgba(255,59,48,0.10);color:var(--c-danger);}
+  .msg.info{background:var(--c-tint-bg);color:var(--c-tint);}
 
-  -- Parallel arrays for the transfer loop, sorted ascending by net so
-  -- the biggest debtor (most negative) is at index 1.
-  select array_agg(dir_id   order by net asc),
-         array_agg(dir_name order by net asc),
-         array_agg(net      order by net asc)
-    into arr_id, arr_name, arr_net
-  from tmp_bals;
+  /* ---- APP SHELL ---- */
+  .header{position:sticky;top:0;z-index:90;height:calc(var(--header-h) + var(--safe-t));
+    padding-top:var(--safe-t);background:var(--c-surface);
+    border-bottom:0.5px solid var(--c-border);
+    display:flex;align-items:center;justify-content:space-between;
+    padding-left:16px;padding-right:8px;}
+  .header-title{font-size:18px;font-weight:700;}
+  .header-right{display:flex;align-items:center;gap:2px;}
+  .icon-btn{width:38px;height:38px;border-radius:9px;display:flex;
+    align-items:center;justify-content:center;color:var(--c-text);}
+  .icon-btn:active{background:var(--c-bg);}
+  .avatar{width:32px;height:32px;border-radius:50%;background:var(--c-tint);
+    color:#fff;font-size:13px;font-weight:700;display:flex;
+    align-items:center;justify-content:center;}
 
-  -- Greedy transfer matching: pair the biggest debtor with the biggest
-  -- creditor, settle as much as possible, move on.
-  if arr_net is not null then
-    n := array_length(arr_net,1);
-    i := 1; j := n;
-    while i is not null and j is not null and i < j loop
-      if arr_net[i] > -v_eps then exit; end if;        -- no real debt left
-      if arr_net[j] <  v_eps then exit; end if;        -- no real credit left
-      v_amt := round(least(-arr_net[i], arr_net[j])::numeric, 2);
-      if v_amt > 0 then
-        v_transfers := v_transfers || jsonb_build_array(jsonb_build_object(
-          'from_id',   arr_id[i],
-          'from_name', arr_name[i],
-          'to_id',     arr_id[j],
-          'to_name',   arr_name[j],
-          'amount',    v_amt
-        ));
-        arr_net[i] := arr_net[i] + v_amt;
-        arr_net[j] := arr_net[j] - v_amt;
-      end if;
-      if arr_net[i] > -v_eps then i := i + 1; end if;
-      if arr_net[j] <  v_eps then j := j - 1; end if;
-    end loop;
-  end if;
+  .content{padding:16px 16px 90px;max-width:540px;margin:0 auto;}
 
-  drop table tmp_bals;
+  /* ---- TABS ---- */
+  .tabs{position:sticky;top:calc(var(--header-h) + var(--safe-t));z-index:80;
+    background:var(--c-surface);border-bottom:0.5px solid var(--c-border);
+    display:flex;}
+  .tab{flex:1;background:none;border:none;padding:11px 4px 10px;
+    color:var(--c-text-2);font-size:12px;font-weight:500;
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+    border-bottom:2px solid transparent;cursor:pointer;}
+  .tab svg{width:20px;height:20px;}
+  .tab.active{color:var(--c-tint);border-bottom-color:var(--c-tint);}
+  .tab-pane{padding-top:2px;}
+  .tab-count{font-size:12px;font-weight:600;color:var(--c-text-3);
+    padding:4px 2px 10px;text-transform:uppercase;letter-spacing:.3px;}
 
-  return jsonb_build_object(
-    'total_cost', round(v_total,2),
-    'balances',   v_balances,
-    'transfers',  v_transfers
-  );
-end;
-$$;
+  /* ---- PERSON ROW (People tab) ---- */
+  .person-row{display:flex;align-items:center;gap:12px;padding:13px 16px;
+    background:var(--c-card);border-radius:var(--r);margin-bottom:8px;
+    box-shadow:var(--shadow);}
+  .person-avatar{width:36px;height:36px;border-radius:50%;background:var(--c-tint);
+    color:#fff;font-weight:700;font-size:14px;display:flex;
+    align-items:center;justify-content:center;flex-shrink:0;}
+  .person-info{flex:1;min-width:0;}
+  .person-name-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .person-name{font-size:15px;font-weight:600;}
+  .person-email{font-size:12px;color:var(--c-text-2);margin-top:2px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pico{display:inline-flex;align-items:center;gap:3px;font-size:11px;
+    font-weight:600;padding:2px 7px;border-radius:6px;}
+  .pico.admin{background:var(--c-tint-bg);color:var(--c-tint);}
+  .pico.me{background:rgba(48,209,88,0.15);color:var(--c-success);}
+  .pico.noacc{background:rgba(255,149,0,0.13);color:var(--c-warn);}
+
+  /* ---- ADD PERSON SEARCH RESULTS ---- */
+  .ap-results{margin-top:4px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);max-height:200px;overflow-y:auto;
+    background:var(--c-bg);}
+  .ap-result{display:flex;align-items:center;gap:10px;padding:10px 12px;
+    cursor:pointer;border-bottom:0.5px solid var(--c-border);}
+  .ap-result:last-child{border-bottom:none;}
+  .ap-result:active{background:var(--c-tint-bg);}
+  .ap-result-main{flex:1;min-width:0;}
+  .ap-result-name{font-size:14px;font-weight:600;}
+  .ap-result-email{font-size:11px;color:var(--c-text-2);}
+
+  /* swipe-to-remove (simple) */
+  .person-actions{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+  .icon-btn-sm{width:32px;height:32px;border-radius:8px;display:flex;
+    align-items:center;justify-content:center;color:var(--c-text-2);}
+  .icon-btn-sm:active{background:var(--c-bg);}
+  .icon-btn-sm.danger{color:var(--c-danger);}
+  .icon-btn-sm svg{width:16px;height:16px;}
+
+  /* ---- EXPENSE CARD (Expenses tab) ---- */
+  .exp-card{background:var(--c-card);border-radius:var(--r);margin-bottom:8px;
+    box-shadow:var(--shadow);overflow:hidden;}
+  .exp-row{display:flex;align-items:center;padding:13px 14px;width:100%;
+    text-align:left;cursor:pointer;}
+  .exp-row:active{background:var(--c-bg);}
+  .exp-left{flex:1;min-width:0;}
+  .exp-desc{font-size:15px;font-weight:600;}
+  .exp-meta{font-size:12px;color:var(--c-text-2);margin-top:2px;}
+  .exp-amount{font-size:16px;font-weight:700;flex-shrink:0;margin-left:10px;}
+  .exp-chevron{margin-left:8px;color:var(--c-text-3);flex-shrink:0;
+    transition:transform .15s;}
+  .exp-chevron svg{width:16px;height:16px;}
+  .exp-chevron.open{transform:rotate(180deg);}
+  .exp-split-panel{padding:0 14px 14px;border-top:0.5px solid var(--c-border);}
+  .exp-split-head{font-size:11px;font-weight:600;color:var(--c-text-3);
+    text-transform:uppercase;letter-spacing:.3px;padding:10px 0 4px;}
+  .exp-split-per-person{font-size:13px;font-weight:600;color:var(--c-tint);
+    padding:2px 0 8px;}
+  .exp-split-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;
+    padding:2px 0;}
+  .exp-split-cell{font-size:14px;padding:4px 0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;}
+
+  /* ---- EXPENSE MODAL — split list ---- */
+  .ex-split-mode{display:flex;gap:8px;margin-top:4px;}
+  .ex-radio{flex:1 1 0;display:flex;align-items:center;justify-content:center;
+    gap:8px;padding:11px 12px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);background:var(--c-bg);
+    font-size:14px;font-weight:500;cursor:pointer;min-height:46px;
+    box-sizing:border-box;}
+  .ex-radio input{margin:0;width:16px;height:16px;flex-shrink:0;accent-color:var(--c-tint);}
+  .ex-radio:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);color:var(--c-tint);}
+  #ex-split-list{margin-top:10px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);max-height:240px;overflow-y:auto;}
+  .ex-split-row{display:flex;align-items:center;gap:12px;padding:10px 14px;
+    border-bottom:0.5px solid var(--c-border);cursor:pointer;}
+  .ex-split-row:last-child{border-bottom:none;}
+  .ex-split-row input{width:20px;height:20px;accent-color:var(--c-tint);
+    flex-shrink:0;margin:0;}
+  .ex-split-row-name{flex:1;font-size:14px;}
+
+  /* ---- SETTLEMENT TAB ---- */
+  .settle-summary{background:var(--c-card);border-radius:var(--r);padding:16px;
+    box-shadow:var(--shadow);margin-bottom:12px;}
+  .ss-row{display:flex;justify-content:space-between;gap:20px;}
+  .ss-lbl{font-size:11px;font-weight:600;color:var(--c-text-3);
+    text-transform:uppercase;letter-spacing:.3px;}
+  .ss-val{font-size:20px;font-weight:700;margin-top:2px;}
+  .ss-settled{margin-top:10px;font-size:13px;font-weight:600;color:var(--c-warn);
+    text-align:center;padding:6px;background:rgba(255,149,0,0.10);border-radius:8px;}
+
+  .settle-me{background:var(--c-card);border-radius:var(--r);padding:16px 18px;
+    box-shadow:var(--shadow);margin-bottom:12px;text-align:center;
+    border-left:4px solid var(--c-text-3);}
+  .settle-me.owed{border-left-color:var(--c-success);}
+  .settle-me.owe{border-left-color:var(--c-danger);}
+  .settle-me.even{border-left-color:var(--c-text-3);}
+  .sm-label{font-size:13px;color:var(--c-text-2);}
+  .sm-amount{font-size:28px;font-weight:700;margin-top:4px;}
+  .settle-me.owed .sm-amount{color:var(--c-success);}
+  .settle-me.owe  .sm-amount{color:var(--c-danger);}
+
+  .balance-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
+    box-shadow:var(--shadow);}
+  .bal-row{display:flex;align-items:center;gap:12px;padding:11px 14px;
+    border-bottom:0.5px solid var(--c-border);}
+  .bal-row:last-child{border-bottom:none;}
+  .bal-info{flex:1;min-width:0;}
+  .bal-name{font-size:14px;font-weight:600;}
+  .bal-sub{font-size:11px;color:var(--c-text-2);margin-top:1px;}
+
+  .transfer-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
+    box-shadow:var(--shadow);}
+  .transfer-row{display:flex;align-items:center;gap:10px;padding:12px 14px;
+    border-bottom:0.5px solid var(--c-border);font-size:14px;}
+  .transfer-row:last-child{border-bottom:none;}
+  .transfer-name{font-weight:500;}
+  .transfer-arrow{width:18px;height:18px;color:var(--c-text-3);flex-shrink:0;}
+  .transfer-amount{margin-left:auto;font-weight:700;color:var(--c-tint);}
+
+  /* ---- TRIP CARDS ---- */
+  .trip-card{background:var(--c-card);border-radius:var(--r);margin-bottom:12px;
+    box-shadow:var(--shadow);overflow:hidden;}
+  .trip-card-row{display:flex;align-items:center;}
+  .trip-card-inner{flex:1;text-align:left;padding:15px 16px;min-width:0;}
+  .trip-card-name{font-size:16px;font-weight:700;}
+  .trip-card-sub{font-size:12px;color:var(--c-text-2);margin-top:2px;}
+  .trip-card-creator{font-size:11px;color:var(--c-tint);margin-top:3px;font-weight:500;}
+  .trip-card-right{display:flex;align-items:center;gap:10px;
+    padding-right:14px;flex-shrink:0;}
+  .pill{font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;}
+  .pill.even{background:var(--c-bg);color:var(--c-text-2);}
+  .pill.owed{background:rgba(48,209,88,0.15);color:var(--c-success);}
+  .pill.owe{background:rgba(255,59,48,0.13);color:var(--c-danger);}
+  .pill.settled{background:var(--c-bg);color:var(--c-text-3);}
+  .trip-lock{display:flex;align-items:center;flex-shrink:0;}
+  .trip-lock svg{width:18px;height:18px;}
+  .trip-lock.locked{color:var(--c-warn);}
+  .trip-lock.unlocked{color:var(--c-success);}
+
+  .empty{text-align:center;padding:60px 20px;}
+  .empty-title{font-size:16px;font-weight:600;margin-bottom:4px;}
+  .empty-sub{font-size:13px;color:var(--c-text-2);}
+
+  /* ---- FAB ---- */
+  .fab{position:fixed;right:20px;bottom:calc(20px + var(--safe-b));
+    width:56px;height:56px;border-radius:50%;background:var(--c-tint);color:#fff;
+    font-size:30px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 4px 16px rgba(10,132,255,0.4);z-index:80;}
+  .fab:active{opacity:.85;}
+
+  /* ---- MODAL ---- */
+  .modal{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;
+    justify-content:center;}
+  .modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.4);}
+  .modal-sheet{position:relative;width:100%;max-width:480px;max-height:88dvh;
+    background:var(--c-surface);border-radius:16px 16px 0 0;overflow-y:auto;
+    padding:0 20px calc(20px + var(--safe-b));animation:slideUp .25s ease-out;
+    display:flex;flex-direction:column;}
+  @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .modal-handle{width:36px;height:4px;border-radius:2px;background:var(--c-text-3);
+    margin:10px auto 14px;opacity:.4;}
+  .modal-title{font-size:18px;font-weight:700;text-align:center;margin-bottom:16px;}
+  .modal-body{padding-bottom:12px;}
+  .modal-body label{display:block;font-size:12px;font-weight:600;
+    color:var(--c-text-2);margin-bottom:6px;margin-top:14px;}
+  .modal-body label:first-child{margin-top:0;}
+  .modal-actions{display:flex;gap:10px;padding-top:12px;position:sticky;bottom:0;
+    background:var(--c-surface);margin-top:auto;}
+  .modal-actions .btn{margin-top:0;flex:1;}
+
+  /* ---- MISC ---- */
+  .spinner{width:24px;height:24px;border:2.5px solid var(--c-border);
+    border-top-color:var(--c-tint);border-radius:50%;
+    animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .center-spin{min-height:60dvh;display:flex;align-items:center;justify-content:center;}
+  .toast{position:fixed;bottom:calc(90px + var(--safe-b));left:50%;
+    transform:translateX(-50%);background:var(--c-text);color:var(--c-bg);
+    padding:11px 18px;border-radius:22px;font-size:14px;font-weight:500;
+    z-index:300;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap;}
+  .toast.show{opacity:1;}
+  .toast.err{background:var(--c-danger);color:#fff;}
+  .ver{text-align:center;font-size:11px;color:var(--c-text-3);opacity:.6;
+    padding:20px 0 4px;}
+  .overlay-spin{position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:400;
+    display:flex;align-items:center;justify-content:center;}
+  .overlay-spin .box{background:var(--c-surface);border-radius:16px;
+    padding:24px 32px;display:flex;flex-direction:column;align-items:center;gap:12px;}
+  .overlay-spin .box .spinner{width:36px;height:36px;}
+  .overlay-spin .box .lbl{font-size:14px;font-weight:500;}
+</style>
+</head>
+<body>
+
+<!-- ======================= AUTH ======================= -->
+<div id="view-auth" class="auth-wrap" hidden>
+  <div class="auth-card">
+    <div class="auth-icon">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="31" fill="var(--c-tint-bg)"/>
+        <path d="M24 15h17a2 2 0 0 1 2 2v30l-4-2.8L35 47l-4-2.8L27 47l-4-2.8V17a2 2 0 0 1 2-2z" fill="var(--c-surface)" stroke="var(--c-tint)" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M27 24h11M27 30h11M27 36h7" stroke="var(--c-tint)" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div id="auth-content"></div>
+    <div class="ver" id="auth-ver"></div>
+  </div>
+</div>
+
+<!-- ======================= TRIPS ======================= -->
+<div id="view-trips" hidden>
+  <div class="header">
+    <span class="header-title">Trips</span>
+    <div class="header-right">
+      <button class="icon-btn" id="btn-account" title="Account">
+        <span class="avatar" id="avatar">?</span>
+      </button>
+    </div>
+  </div>
+  <div class="content" id="trips-content"></div>
+  <button class="fab" id="fab-new-trip" title="New trip">+</button>
+</div>
+
+<!-- ======================= TRIP DETAIL ======================= -->
+<div id="view-trip" hidden>
+  <div class="header">
+    <button class="icon-btn" id="td-back" title="Back">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <span class="header-title" id="td-name" style="flex:1;text-align:center;font-size:16px;"></span>
+    <div class="header-right">
+      <button class="icon-btn" id="btn-account-2" title="Account">
+        <span class="avatar" id="avatar-2">?</span>
+      </button>
+    </div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-tab="settlement">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      <span>Settlement</span>
+    </button>
+    <button class="tab" data-tab="expenses">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2l1.5 2L9 2l1.5 2L12 2l1.5 2L15 2l1.5 2L18 2v20l-1.5-2L15 22l-1.5-2L12 22l-1.5-2L9 22l-1.5-2L6 22z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+      <span>Expenses</span>
+    </button>
+    <button class="tab" data-tab="people">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>People</span>
+    </button>
+  </div>
+  <div class="content">
+    <div id="tab-settlement" class="tab-pane"></div>
+    <div id="tab-expenses" class="tab-pane" hidden></div>
+    <div id="tab-people" class="tab-pane" hidden></div>
+  </div>
+  <button class="fab" id="td-fab" hidden title="Add">+</button>
+</div>
+
+<!-- ======================= ADD PERSON MODAL ======================= -->
+<div class="modal" id="modal-add-person" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Add Person</div>
+    <div class="modal-body">
+      <label for="ap-search">Search the directory</label>
+      <input type="text" id="ap-search" class="field" placeholder="Type a name or email…" autocomplete="off">
+      <div id="ap-results" class="ap-results" hidden></div>
+      <div style="font-size:12px;color:var(--c-text-3);margin:14px 0 4px;text-align:center;">— or add a new person —</div>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label for="ap-first">First name</label>
+          <input type="text" id="ap-first" class="field" maxlength="40">
+        </div>
+        <div style="flex:1;">
+          <label for="ap-last">Last name</label>
+          <input type="text" id="ap-last" class="field" maxlength="40">
+        </div>
+      </div>
+      <label for="ap-email" style="margin-top:14px;">Email (optional)</label>
+      <input type="email" id="ap-email" class="field" placeholder="email@example.com">
+      <div class="msg" id="ap-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ap-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ap-save">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= EXPENSE MODAL (add / edit) ======================= -->
+<div class="modal" id="modal-expense" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="ex-title">Add Expense</div>
+    <div class="modal-body">
+      <label for="ex-desc">Description</label>
+      <input type="text" id="ex-desc" class="field" placeholder="e.g. Dinner" maxlength="80">
+      <label for="ex-amount">Amount ($)</label>
+      <input type="number" id="ex-amount" class="field" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00">
+      <label for="ex-paid-by">Paid by</label>
+      <select id="ex-paid-by" class="field"></select>
+      <label style="margin-top:14px;">Split between</label>
+      <div class="ex-split-mode">
+        <label class="ex-radio"><input type="radio" name="ex-split" value="everyone" checked> Everyone</label>
+        <label class="ex-radio"><input type="radio" name="ex-split" value="custom"> Custom</label>
+      </div>
+      <div id="ex-split-list" hidden></div>
+      <div class="msg" id="ex-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ex-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;font-size:20px;">×</button>
+      <button class="btn btn-secondary" id="ex-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ex-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= NEW TRIP MODAL ======================= -->
+<div class="modal" id="modal-new-trip" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">New Trip</div>
+    <div class="modal-body">
+      <label for="nt-name">Trip name</label>
+      <input type="text" id="nt-name" class="field" placeholder="e.g. Weekend in Lisbon" maxlength="60">
+      <div class="msg" id="nt-msg"></div>
+      <div style="font-size:13px;color:var(--c-text-2);margin-top:14px;line-height:1.5;">
+        You'll be the trip admin. Add people and expenses once it's created.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="nt-cancel">Cancel</button>
+      <button class="btn btn-primary" id="nt-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= ACCOUNT MODAL ======================= -->
+<div class="modal" id="modal-account" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Account</div>
+    <div class="modal-body">
+      <div style="font-size:14px;color:var(--c-text-2);margin-bottom:4px;">Signed in as</div>
+      <div style="font-size:15px;font-weight:600;" id="acc-email"></div>
+      <div style="font-size:13px;color:var(--c-text-3);margin-top:2px;" id="acc-role"></div>
+      <button class="btn btn-secondary" id="acc-change-pin" style="margin-top:18px;">Change my PIN</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="acc-close">Close</button>
+      <button class="btn btn-primary" id="acc-signout" style="background:var(--c-danger);">Sign Out</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= CHANGE PIN MODAL ======================= -->
+<div class="modal" id="modal-change-pin" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Change PIN</div>
+    <div class="modal-body">
+      <label for="cp-old">Current PIN</label>
+      <input type="password" id="cp-old" class="field" inputmode="numeric" maxlength="4"
+        placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">
+      <label for="cp-new">New PIN</label>
+      <input type="password" id="cp-new" class="field" inputmode="numeric" maxlength="4"
+        placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">
+      <label for="cp-new2">Confirm new PIN</label>
+      <input type="password" id="cp-new2" class="field" inputmode="numeric" maxlength="4"
+        placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">
+      <div class="msg" id="cp-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="cp-cancel">Cancel</button>
+      <button class="btn btn-primary" id="cp-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function(){
+'use strict';
+
+// ============================================================
+//  CONFIG
+// ============================================================
+var APP_VERSION = 'V2-1.0';
+var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
+
+// persistSession keeps the login token in localStorage so closing and
+// reopening the page does NOT require signing in again. autoRefreshToken
+// renews it silently before it expires. detectSessionInUrl lets the magic
+// link complete the sign-in when the user lands back on the page.
+var sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: window.localStorage
+  }
+});
+
+// ============================================================
+//  STATE + HELPERS
+// ============================================================
+var state = { session:null, profile:null, trips:[] };
+var $ = function(id){ return document.getElementById(id); };
+function show(id){ $(id).hidden = false; }
+function hide(id){ $(id).hidden = true; }
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function money(n){
+  var v = Number(n)||0;
+  return (v<0?'-$':'$') + Math.abs(v).toFixed(2);
+}
+var toastTimer=null;
+function toast(text, isErr){
+  var t=$('toast'); t.textContent=text;
+  t.className='toast show'+(isErr?' err':'');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){ t.className='toast'; },2600);
+}
+var overlayEl=null;
+function overlay(label){
+  if(overlayEl) return;
+  overlayEl=document.createElement('div');
+  overlayEl.className='overlay-spin';
+  overlayEl.innerHTML='<div class="box"><div class="spinner"></div>'+
+    '<div class="lbl">'+esc(label||'Working…')+'</div></div>';
+  document.body.appendChild(overlayEl);
+}
+function overlayOff(){
+  if(overlayEl){ overlayEl.remove(); overlayEl=null; }
+}
+function openModal(id){ show(id); document.body.style.overflow='hidden'; }
+function closeModal(id){ hide(id); document.body.style.overflow=''; }
+
+// ============================================================
+//  AUTH — email + persistent PIN, with email-OTP fallback
+// ============================================================
+// Flow:
+//   1. Enter email. We check pin_status(email) and whether THIS device
+//      already has a Supabase session for that email.
+//   2a. PIN exists + this device has a session  -> "Enter PIN" screen.
+//   2b. PIN exists but no session on this device -> must do email OTP first
+//       (security: a new device needs email proof, not just the PIN).
+//   2c. No PIN yet -> email OTP -> "Create PIN" screen.
+//   3. "Forgot PIN" -> email OTP -> "Create new PIN".
+var authFlow = { email:'', mode:'' };   // mode: 'pin' | 'otp-setup' | 'otp-reset'
+
+function setAuthMsg(type,text){
+  var m=$('auth-msg'); if(!m) return;
+  m.className='msg show '+type; m.textContent=text;
+}
+
+// ---- Screen: enter email ----
+function renderAuthEmail(){
+  $('auth-content').innerHTML =
+    '<h1>Sign in</h1>'+
+    '<div class="auth-sub">Enter your email to continue.</div>'+
+    '<label for="email">Email address</label>'+
+    '<input type="email" id="email" class="field" placeholder="you@example.com" '+
+      'autocomplete="email" value="'+esc(authFlow.email)+'">'+
+    '<button class="btn btn-primary" id="email-btn" style="margin-top:16px;">Continue</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  var inp=$('email');
+  inp.focus();
+  $('email-btn').onclick=function(){ submitEmail(inp.value.trim()); };
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter') submitEmail(inp.value.trim());
+  });
+}
+
+async function submitEmail(email){
+  if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    setAuthMsg('err','Please enter a valid email address.');
+    return;
+  }
+  authFlow.email=email.toLowerCase();
+  var btn=$('email-btn');
+  btn.disabled=true; btn.textContent='Checking…';
+  try{
+    // Does this email already have a PIN? Is it locked?
+    var st=await sb.rpc('pin_status',{ p_email:authFlow.email });
+    if(st.error) throw st.error;
+    var status=(st.data&&st.data[0])||{ has_pin:false, locked:false };
+    // Does THIS device already have a Supabase session for this email?
+    var sess=await sb.auth.getSession();
+    var haveSession = !!(sess.data&&sess.data.session
+      && sess.data.session.user
+      && sess.data.session.user.email
+      && sess.data.session.user.email.toLowerCase()===authFlow.email);
+
+    if(status.has_pin && haveSession){
+      // Fast path — just ask for the PIN.
+      if(status.locked){ renderAuthLocked(status.locked_until); }
+      else { renderAuthPin(); }
+    }else{
+      // Need email proof: send an OTP code.
+      // (No PIN yet, OR a new device with no session.)
+      await sendOtp(status.has_pin ? 'otp-reset' : 'otp-setup');
+    }
+  }catch(err){
+    btn.disabled=false; btn.textContent='Continue';
+    setAuthMsg('err',err.message||'Something went wrong.');
+  }
+}
+
+// ---- Send an email OTP code ----
+async function sendOtp(mode){
+  authFlow.mode=mode;
+  setAuthMsg('info','Sending a code to your email…');
+  var res=await sb.auth.signInWithOtp({
+    email:authFlow.email,
+    options:{ emailRedirectTo: window.location.origin+window.location.pathname }
+  });
+  if(res.error) throw res.error;
+  renderAuthOtp();
+}
+
+// ---- Screen: enter OTP code ----
+function renderAuthOtp(){
+  var note = authFlow.mode==='otp-reset'
+    ? 'Enter it below to reset your PIN.'
+    : 'Enter it below to finish signing in.';
+  $('auth-content').innerHTML=
+    '<h1>Enter code</h1>'+
+    '<div class="auth-sub">We emailed a 6-digit code to<br><strong>'+esc(authFlow.email)+'</strong>. '+note+'</div>'+
+    '<label for="otp">6-digit code</label>'+
+    '<input type="text" id="otp" class="field" inputmode="numeric" '+
+      'autocomplete="one-time-code" maxlength="6" placeholder="000000" '+
+      'style="text-align:center;font-size:22px;letter-spacing:6px;">'+
+    '<button class="btn btn-primary" id="otp-btn" style="margin-top:16px;">Verify</button>'+
+    '<button class="btn btn-secondary" id="otp-resend" style="margin-top:10px;">Resend code</button>'+
+    '<button class="btn btn-secondary" id="otp-back" style="margin-top:10px;">Use a different email</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  var inp=$('otp');
+  inp.focus();
+  $('otp-btn').onclick=function(){ verifyOtp(inp.value.trim()); };
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter') verifyOtp(inp.value.trim());
+  });
+  $('otp-resend').onclick=async function(){
+    try{ await sendOtp(authFlow.mode); setAuthMsg('info','A new code is on its way.'); }
+    catch(err){ setAuthMsg('err',err.message||'Could not resend.'); }
+  };
+  $('otp-back').onclick=renderAuthEmail;
+}
+
+async function verifyOtp(code){
+  if(!code||!/^\d{4,8}$/.test(code)){
+    setAuthMsg('err','Enter the code from your email.');
+    return;
+  }
+  var btn=$('otp-btn');
+  btn.disabled=true; btn.textContent='Verifying…';
+  try{
+    var res=await sb.auth.verifyOtp({
+      email:authFlow.email, token:code, type:'email'
+    });
+    if(res.error) throw res.error;
+    // Signed in. Now the user must set a (new) PIN.
+    state.session=res.data.session;
+    renderAuthSetPin(authFlow.mode==='otp-reset');
+  }catch(err){
+    btn.disabled=false; btn.textContent='Verify';
+    setAuthMsg('err','Incorrect or expired code. Try again.');
+  }
+}
+
+// ---- Screen: create / reset PIN ----
+function renderAuthSetPin(isReset){
+  $('auth-content').innerHTML=
+    '<h1>'+(isReset?'Set a new PIN':'Create your PIN')+'</h1>'+
+    '<div class="auth-sub">Choose a 4-digit PIN. You\'ll use it to sign in quickly next time.</div>'+
+    '<label for="pin1">New PIN</label>'+
+    '<input type="password" id="pin1" class="field" inputmode="numeric" maxlength="4" '+
+      'placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">'+
+    '<label for="pin2" style="margin-top:14px;display:block;text-align:left;'+
+      'font-size:12px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;">Confirm PIN</label>'+
+    '<input type="password" id="pin2" class="field" inputmode="numeric" maxlength="4" '+
+      'placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">'+
+    '<button class="btn btn-primary" id="setpin-btn" style="margin-top:16px;">Save PIN</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  $('pin1').focus();
+  $('setpin-btn').onclick=submitNewPin;
+  $('pin2').addEventListener('keydown',function(e){
+    if(e.key==='Enter') submitNewPin();
+  });
+}
+async function submitNewPin(){
+  var p1=$('pin1').value, p2=$('pin2').value;
+  if(!/^\d{4}$/.test(p1)){ setAuthMsg('err','PIN must be exactly 4 digits.'); return; }
+  if(p1!==p2){ setAuthMsg('err','The two PINs don\'t match.'); return; }
+  var btn=$('setpin-btn');
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    var res=await sb.rpc('set_pin',{ p_new_pin:p1 });
+    if(res.error) throw res.error;
+    // PIN set — proceed into the app.
+    enterApp();
+  }catch(err){
+    btn.disabled=false; btn.textContent='Save PIN';
+    setAuthMsg('err',err.message||'Could not save PIN.');
+  }
+}
+
+// ---- Screen: enter PIN ----
+function renderAuthPin(){
+  $('auth-content').innerHTML=
+    '<h1>Enter your PIN</h1>'+
+    '<div class="auth-sub">Signing in as<br><strong>'+esc(authFlow.email)+'</strong></div>'+
+    '<input type="password" id="pin" class="field" inputmode="numeric" maxlength="4" '+
+      'placeholder="••••" style="text-align:center;font-size:24px;letter-spacing:10px;">'+
+    '<button class="btn btn-primary" id="pin-btn" style="margin-top:16px;">Sign in</button>'+
+    '<button class="btn btn-secondary" id="pin-forgot" style="margin-top:10px;">Forgot PIN?</button>'+
+    '<button class="btn btn-secondary" id="pin-back" style="margin-top:10px;">Use a different email</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  var inp=$('pin');
+  inp.focus();
+  $('pin-btn').onclick=function(){ submitPin(inp.value); };
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter') submitPin(inp.value);
+  });
+  $('pin-forgot').onclick=async function(){
+    setAuthMsg('info','Sending a reset code…');
+    try{ await sendOtp('otp-reset'); }
+    catch(err){ setAuthMsg('err',err.message||'Could not send code.'); }
+  };
+  $('pin-back').onclick=renderAuthEmail;
+}
+async function submitPin(pin){
+  if(!/^\d{4}$/.test(pin)){ setAuthMsg('err','Enter your 4-digit PIN.'); return; }
+  var btn=$('pin-btn');
+  btn.disabled=true; btn.textContent='Checking…';
+  try{
+    var res=await sb.rpc('verify_pin',{ p_pin:pin });
+    if(res.error) throw res.error;
+    // verify_pin RETURNS a status string (it no longer throws for
+    // wrong/locked, so the attempt counter persists).
+    var result=String(res.data||'');
+    if(result==='ok'){
+      enterApp();
+      return;
+    }
+    btn.disabled=false; btn.textContent='Sign in';
+    if(result==='LOCKED'){
+      renderAuthLocked(null);
+    }else if(result.indexOf('WRONG:')===0){
+      var left=result.split('WRONG:')[1];
+      setAuthMsg('err','Incorrect PIN. '+left+' attempt'+(left==='1'?'':'s')+' left.');
+      $('pin').value='';
+      $('pin').focus();
+    }else if(result==='NO_PIN'){
+      renderAuthSetPin(false);
+    }else if(result.indexOf('ERR:')===0){
+      setAuthMsg('err',result.slice(4));
+    }else{
+      setAuthMsg('err','Could not verify PIN.');
+    }
+  }catch(err){
+    btn.disabled=false; btn.textContent='Sign in';
+    setAuthMsg('err',err.message||'Could not verify PIN.');
+  }
+}
+
+// ---- Screen: locked out ----
+function renderAuthLocked(until){
+  var when='';
+  if(until){
+    var d=new Date(until);
+    when=' until '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  }
+  $('auth-content').innerHTML=
+    '<h1>Too many attempts</h1>'+
+    '<div class="auth-sub">This account is locked for 15 minutes after 3 wrong PIN entries'+when+'. '+
+    'You can reset your PIN by email instead.</div>'+
+    '<button class="btn btn-primary" id="locked-reset">Reset PIN by email</button>'+
+    '<button class="btn btn-secondary" id="locked-back" style="margin-top:10px;">Back</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  $('locked-reset').onclick=async function(){
+    setAuthMsg('info','Sending a reset code…');
+    try{ await sendOtp('otp-reset'); }
+    catch(err){ setAuthMsg('err',err.message||'Could not send code.'); }
+  };
+  $('locked-back').onclick=renderAuthEmail;
+}
+
+// ============================================================
+//  TRIPS SCREEN
+// ============================================================
+async function loadTrips(){
+  $('trips-content').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res=await sb.rpc('list_my_trips');
+    if(res.error) throw res.error;
+    state.trips=res.data||[];
+    renderTrips();
+  }catch(err){
+    $('trips-content').innerHTML=
+      '<div class="empty"><div class="empty-title">Could not load trips</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+function renderTrips(){
+  var el=$('trips-content');
+  if(state.trips.length===0){
+    el.innerHTML=
+      '<div class="empty"><div class="empty-title">No trips yet</div>'+
+      '<div class="empty-sub">Tap + to create your first trip.</div></div>';
+    return;
+  }
+  var h='';
+  state.trips.forEach(function(t){
+    var net=Number(t.my_net)||0;
+    var pillCls='even', pillTxt='Even';
+    if(t.settled){ pillCls='settled'; pillTxt='Settled'; }
+    else if(net>0.01){ pillCls='owed'; pillTxt='+'+money(net).replace('-',''); }
+    else if(net<-0.01){ pillCls='owe'; pillTxt=money(net); }
+    var lock = t.settled
+      ? '<span class="trip-lock locked" title="Settled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>'
+      : '<span class="trip-lock unlocked" title="Active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></span>';
+    var creator='';
+    if(state.profile && state.profile.is_global_admin){
+      creator='<div class="trip-card-creator">Created by '+
+        (t.created_by_me?'you':esc(t.creator_name))+'</div>';
+    }
+    h+='<div class="trip-card">'+
+      '<div class="trip-card-row">'+
+        '<button class="trip-card-inner" data-trip="'+t.trip_id+'">'+
+          '<div class="trip-card-name">'+esc(t.name)+'</div>'+
+          '<div class="trip-card-sub">'+t.member_count+' '+
+            (t.member_count==1?'person':'people')+' &middot; '+
+            t.expense_count+' '+(t.expense_count==1?'expense':'expenses')+'</div>'+
+          creator+
+        '</button>'+
+        '<div class="trip-card-right">'+
+          '<span class="pill '+pillCls+'">'+pillTxt+'</span>'+
+          lock+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  });
+  el.innerHTML=h;
+  el.onclick=function(ev){
+    var card=ev.target.closest('[data-trip]');
+    if(card) openTrip(card.dataset.trip);
+  };
+}
+
+// ============================================================
+//  TRIP DETAIL — settlement / expenses / people
+// ============================================================
+state.trip = null;
+state.activeTab = 'settlement';
+
+async function openTrip(tripId){
+  hide('view-trips');
+  show('view-trip');
+  $('td-name').textContent = '';
+  state.activeTab='settlement';
+  state.expandedExpense = null;
+  state.expensesLoadedFor = null;       // force expenses reload on first visit
+  setActiveTab('settlement');
+  $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  $('tab-expenses').innerHTML='';
+  $('tab-people').innerHTML='';
+  try{
+    var res=await sb.rpc('get_trip',{ p_trip:tripId });
+    if(res.error) throw res.error;
+    state.trip = res.data;
+    $('td-name').textContent = state.trip.name;
+    renderActiveTab();
+  }catch(err){
+    $('tab-settlement').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load trip</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function setActiveTab(name){
+  state.activeTab=name;
+  document.querySelectorAll('#view-trip .tab').forEach(function(t){
+    t.classList.toggle('active', t.dataset.tab===name);
+  });
+  ['settlement','expenses','people'].forEach(function(n){
+    $('tab-'+n).hidden = (n!==name);
+  });
+  // FAB visibility: People (add member) and Expenses (add expense).
+  var fab=$('td-fab');
+  if(!state.trip || state.trip.settled){
+    hide('td-fab'); fab.onclick=null; return;
+  }
+  if(name==='people' && state.trip.is_admin){
+    show('td-fab'); fab.onclick=openAddPerson;
+  }else if(name==='expenses'){
+    show('td-fab'); fab.onclick=function(){ openExpenseModal(null); };
+  }else{
+    hide('td-fab'); fab.onclick=null;
+  }
+}
+
+function renderActiveTab(){
+  if(state.activeTab==='people'){
+    renderPeopleTab();
+  }else if(state.activeTab==='expenses'){
+    if(!state.expensesLoadedFor || state.expensesLoadedFor !== state.trip.trip_id){
+      state.expensesLoadedFor = state.trip.trip_id;
+      loadExpenses();
+    }else{
+      renderExpensesTab();
+    }
+  }else if(state.activeTab==='settlement'){
+    if(!state.settlementLoadedFor || state.settlementLoadedFor !== state.trip.trip_id){
+      loadSettlement();
+    }else{
+      renderSettlementTab();
+    }
+  }
+  setActiveTab(state.activeTab);
+}
+
+// ----- People tab -----
+function initials(p){
+  var s = ((p.first_name||'') + (p.last_name||'')).replace(/\s/g,'');
+  if(!s) return (p.email||'?')[0].toUpperCase();
+  return ((p.first_name||'')[0]||'').toUpperCase() +
+         ((p.last_name||'')[0]||'').toUpperCase();
+}
+function displayName(p){
+  var n = ((p.first_name||'') + ' ' + (p.last_name||'')).trim();
+  return n || p.email || 'Unnamed';
+}
+function renderPeopleTab(){
+  var t=state.trip;
+  var el=$('tab-people');
+  var n=(t.members||[]).length;
+  var h='<div class="tab-count">'+n+' '+(n===1?'person':'people')+'</div>';
+  (t.members||[]).forEach(function(m){
+    h += '<div class="person-row">'+
+      '<div class="person-avatar">'+esc(initials(m))+'</div>'+
+      '<div class="person-info">'+
+        '<div class="person-name-row">'+
+          '<span class="person-name">'+esc(displayName(m))+'</span>'+
+          (m.is_me ? '<span class="pico me">You</span>' : '')+
+          (m.is_admin ? '<span class="pico admin">Admin</span>' : '')+
+          (!m.has_account ? '<span class="pico noacc">No account</span>' : '')+
+        '</div>'+
+        (m.email ? '<div class="person-email">'+esc(m.email)+'</div>' : '')+
+      '</div>';
+    if(t.is_admin && !t.settled && !m.is_me){
+      h += '<div class="person-actions">'+
+        '<button class="icon-btn-sm danger" data-remove="'+m.directory_id+'" title="Remove">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>'+
+        '</button></div>';
+    }
+    h += '</div>';
+  });
+  el.innerHTML = h;
+  el.onclick = function(ev){
+    var rm = ev.target.closest('[data-remove]');
+    if(rm) removePerson(rm.dataset.remove);
+  };
+}
+
+async function removePerson(directoryId){
+  var member=(state.trip.members||[]).find(function(m){ return m.directory_id===directoryId; });
+  if(!member) return;
+  if(!confirm('Remove '+displayName(member)+' from this trip?')) return;
+  overlay('Removing…');
+  try{
+    var res=await sb.rpc('remove_person_from_trip',
+      { p_trip:state.trip.trip_id, p_directory_id:directoryId });
+    if(res.error) throw res.error;
+    overlayOff();
+    toast('Removed');
+    await reloadTrip();
+  }catch(err){
+    overlayOff();
+    toast(err.message||'Could not remove',true);
+  }
+}
+
+async function reloadTrip(){
+  try{
+    var res=await sb.rpc('get_trip',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    state.trip=res.data;
+    // Member changes can affect both expenses (split lookup) and settlement
+    state.expensesLoadedFor = null;
+    state.settlementLoadedFor = null;
+    renderActiveTab();
+  }catch(err){
+    toast('Refresh failed',true);
+  }
+}
+
+// ----- Expenses tab -----
+state.expenses = [];
+state.expandedExpense = null;   // id of currently-expanded card
+
+async function loadExpenses(){
+  if(!state.trip) return;
+  $('tab-expenses').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res=await sb.rpc('list_trip_expenses',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    state.expenses = res.data || [];
+    renderExpensesTab();
+  }catch(err){
+    $('tab-expenses').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load expenses</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function renderExpensesTab(){
+  var el=$('tab-expenses');
+  var t=state.trip;
+  if(!t) return;
+  var list=state.expenses||[];
+  if(list.length===0){
+    el.innerHTML =
+      '<div class="empty"><div class="empty-title">No expenses yet</div>'+
+      '<div class="empty-sub">Tap + to add your first expense.</div></div>';
+    return;
+  }
+  // Name lookup for split rendering
+  var nameById={};
+  (t.members||[]).forEach(function(m){ nameById[m.directory_id]=displayName(m); });
+
+  var h = '<div class="tab-count">'+list.length+' '+(list.length===1?'expense':'expenses')+'</div>';
+  list.forEach(function(e){
+    var splitIds = e.split_ids || [];
+    var perPerson = splitIds.length ? (Number(e.amount)/splitIds.length) : 0;
+    var open = (state.expandedExpense === e.expense_id);
+    h += '<div class="exp-card">'+
+      '<button class="exp-row" data-toggle="'+e.expense_id+'">'+
+        '<div class="exp-left">'+
+          '<div class="exp-desc">'+esc(e.description)+'</div>'+
+          '<div class="exp-meta">Paid by '+esc(e.paid_by_name||'?')+' · split '+
+            splitIds.length+' '+(splitIds.length===1?'way':'ways')+'</div>'+
+        '</div>'+
+        '<span class="exp-amount">'+money(Number(e.amount))+'</span>'+
+        '<span class="exp-chevron'+(open?' open':'')+'">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'+
+        '</span>'+
+      '</button>';
+    if(open){
+      h += '<div class="exp-split-panel">'+
+        '<div class="exp-split-head">Split between '+splitIds.length+'</div>'+
+        '<div class="exp-split-per-person">'+money(perPerson)+' per person</div>'+
+        '<div class="exp-split-grid">';
+      splitIds.forEach(function(sid){
+        h += '<div class="exp-split-cell">'+esc(nameById[sid]||'Unknown')+'</div>';
+      });
+      h += '</div>';
+      if(t.is_admin && !t.settled){
+        h += '<div style="display:flex;gap:8px;margin-top:12px;">'+
+          '<button class="btn btn-secondary" data-edit="'+e.expense_id+'" style="margin-top:0;">Edit</button>'+
+          '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+  el.innerHTML = h;
+  el.onclick = function(ev){
+    var ed = ev.target.closest('[data-edit]');
+    if(ed){ openExpenseModal(ed.dataset.edit); return; }
+    var tg = ev.target.closest('[data-toggle]');
+    if(tg){
+      var id = tg.dataset.toggle;
+      state.expandedExpense = (state.expandedExpense === id) ? null : id;
+      renderExpensesTab();
+    }
+  };
+}
+
+// ----- Expense modal -----
+state.expenseEditingId = null;
+state.expenseOriginal  = null;
+
+function openExpenseModal(expenseId){
+  var t = state.trip;
+  if(!t || t.settled) return;
+  state.expenseEditingId = expenseId || null;
+  state.expenseOriginal  = null;
+
+  // Populate Paid-by dropdown with trip members
+  var sel = $('ex-paid-by');
+  sel.innerHTML='';
+  var ph=document.createElement('option');
+  ph.value=''; ph.textContent='— Select who paid —'; sel.appendChild(ph);
+  (t.members||[]).forEach(function(m){
+    var o=document.createElement('option');
+    o.value=m.directory_id; o.textContent=displayName(m);
+    sel.appendChild(o);
+  });
+
+  // Build the per-person split list (custom mode)
+  var splitListEl=$('ex-split-list');
+  var sh='';
+  (t.members||[]).forEach(function(m){
+    sh += '<label class="ex-split-row">'+
+      '<input type="checkbox" data-mid="'+m.directory_id+'" checked>'+
+      '<span class="ex-split-row-name">'+esc(displayName(m))+'</span>'+
+      '</label>';
+  });
+  splitListEl.innerHTML = sh;
+  splitListEl.hidden = true;
+
+  // Reset fields
+  $('ex-msg').className='msg';
+  document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
+
+  if(expenseId){
+    // EDIT mode — fill from existing expense
+    var exp = (state.expenses||[]).find(function(e){ return e.expense_id===expenseId; });
+    if(!exp){ toast('Expense not found',true); return; }
+    $('ex-title').textContent = 'Edit Expense';
+    $('ex-desc').value   = exp.description || '';
+    $('ex-amount').value = String(exp.amount);
+    $('ex-paid-by').value= exp.paid_by;
+    // Determine if split is "everyone" or custom
+    var memberIds = (t.members||[]).map(function(m){ return m.directory_id; });
+    var splitIds = (exp.split_ids||[]).map(String);
+    var isEveryone = (splitIds.length === memberIds.length) &&
+                     memberIds.every(function(id){ return splitIds.indexOf(id)>=0; });
+    if(isEveryone){
+      document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
+      splitListEl.hidden = true;
+    }else{
+      document.querySelector('input[name="ex-split"][value="custom"]').checked=true;
+      splitListEl.hidden = false;
+      document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
+        cb.checked = splitIds.indexOf(cb.dataset.mid) >= 0;
+      });
+    }
+    $('ex-delete').hidden = !(t.is_admin);
+    state.expenseOriginal = JSON.stringify(readExpenseForm());
+    // Edit mode: Save starts disabled — only enabled when something changes
+    $('ex-save').textContent = 'Apply Changes';
+    $('ex-save').disabled = true;
+  }else{
+    // ADD mode
+    $('ex-title').textContent = 'Add Expense';
+    $('ex-desc').value=''; $('ex-amount').value=''; $('ex-paid-by').value='';
+    $('ex-delete').hidden = true;
+    $('ex-save').textContent = 'Save';
+    $('ex-save').disabled = false;
+  }
+  openModal('modal-expense');
+}
+
+// Recomputes whether the form differs from the original; toggles Save.
+function checkExpenseChanged(){
+  if(!state.expenseEditingId || !state.expenseOriginal) return;
+  var now = JSON.stringify(readExpenseForm());
+  $('ex-save').disabled = (now === state.expenseOriginal);
+}
+
+function readExpenseForm(){
+  var splitMode = document.querySelector('input[name="ex-split"]:checked').value;
+  var splitIds = null;
+  if(splitMode==='custom'){
+    splitIds = [];
+    document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
+      if(cb.checked) splitIds.push(cb.dataset.mid);
+    });
+  }
+  return {
+    description: $('ex-desc').value.trim(),
+    amount:      $('ex-amount').value,
+    paid_by:     $('ex-paid-by').value,
+    split_mode:  splitMode,
+    split_ids:   splitIds
+  };
+}
+
+async function saveExpense(){
+  var f = readExpenseForm();
+  function setMsg(text){ $('ex-msg').className='msg show err'; $('ex-msg').textContent=text; }
+  if(!f.description){ setMsg('Description is required.'); return; }
+  var amt = Number(f.amount);
+  if(!isFinite(amt) || amt <= 0){ setMsg('Enter a valid amount.'); return; }
+  if(!f.paid_by){ setMsg('Choose who paid.'); return; }
+  if(f.split_mode==='custom' && (!f.split_ids || f.split_ids.length===0)){
+    setMsg('Select at least one person for the split.'); return;
+  }
+  var btn=$('ex-save');
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    if(state.expenseEditingId){
+      var res=await sb.rpc('update_expense',{
+        p_expense: state.expenseEditingId,
+        p_description: f.description,
+        p_amount: amt,
+        p_paid_by: f.paid_by,
+        p_split_ids: f.split_ids
+      });
+      if(res.error) throw res.error;
+    }else{
+      var res2=await sb.rpc('add_expense',{
+        p_trip: state.trip.trip_id,
+        p_description: f.description,
+        p_amount: amt,
+        p_paid_by: f.paid_by,
+        p_split_ids: f.split_ids
+      });
+      if(res2.error) throw res2.error;
+    }
+    closeModal('modal-expense');
+    toast('Saved');
+    state.settlementLoadedFor = null;  // settlement is now stale
+    await loadExpenses();
+  }catch(err){
+    setMsg(err.message||'Could not save.');
+  }
+  btn.disabled=false; btn.textContent='Save';
+}
+
+async function deleteExpense(){
+  if(!state.expenseEditingId) return;
+  if(!confirm('Delete this expense? This cannot be undone.')) return;
+  var btn=$('ex-delete');
+  btn.disabled=true;
+  try{
+    var res=await sb.rpc('delete_expense',{ p_expense: state.expenseEditingId });
+    if(res.error) throw res.error;
+    closeModal('modal-expense');
+    toast('Deleted');
+    state.settlementLoadedFor = null;
+    await loadExpenses();
+  }catch(err){
+    toast(err.message||'Could not delete',true);
+  }
+  btn.disabled=false;
+}
+
+// ----- Settlement tab -----
+state.settlement = null;
+state.settlementLoadedFor = null;
+
+async function loadSettlement(){
+  if(!state.trip) return;
+  $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res=await sb.rpc('get_trip_settlement',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    state.settlement = res.data;
+    state.settlementLoadedFor = state.trip.trip_id;
+    renderSettlementTab();
+  }catch(err){
+    $('tab-settlement').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load settlement</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function renderSettlementTab(){
+  var t=state.trip, s=state.settlement;
+  if(!t || !s){ return; }
+  var balances = s.balances || [];
+  var transfers = s.transfers || [];
+  var total = Number(s.total_cost)||0;
+  var memberCount = (t.members||[]).length;
+  var perPerson = memberCount>0 ? total/memberCount : 0;
+  var myDirId = t.my_directory_id;
+  var myBal = balances.find(function(b){ return b.directory_id===myDirId; });
+
+  var h='';
+
+  // --- Summary card: total + per-person ---
+  h += '<div class="settle-summary">'+
+    '<div class="ss-row">'+
+      '<div><div class="ss-lbl">Total cost</div>'+
+      '<div class="ss-val">'+money(total)+'</div></div>'+
+      '<div><div class="ss-lbl">Per person</div>'+
+      '<div class="ss-val">'+money(perPerson)+'</div></div>'+
+    '</div>'+
+    (t.settled ? '<div class="ss-settled">🔒 Settled</div>' : '')+
+    '</div>';
+
+  // --- My net (if I'm a member) ---
+  if(myBal){
+    var n = Number(myBal.net)||0;
+    var cls = (Math.abs(n) < 0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
+    var label = (Math.abs(n) < 0.005) ? 'You\'re even' :
+                (n>0 ? 'You\'re owed' : 'You owe');
+    h += '<div class="settle-me '+cls+'">'+
+      '<div class="sm-label">'+label+'</div>'+
+      '<div class="sm-amount">'+money(Math.abs(n))+'</div>'+
+      '</div>';
+  }
+
+  // --- Balances list ---
+  h += '<div class="tab-count">Balances</div>';
+  if(balances.length === 0){
+    h += '<div class="empty" style="padding:20px 0;"><div class="empty-sub">No members.</div></div>';
+  }else{
+    h += '<div class="balance-list">';
+    balances.forEach(function(b){
+      var n = Number(b.net)||0;
+      var bcls = (Math.abs(n)<0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
+      var btext = (Math.abs(n)<0.005) ? 'even' :
+                  (n>0 ? '+'+money(n).replace('-','') : money(n));
+      h += '<div class="bal-row">'+
+        '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
+          esc(((b.name||'?')[0]||'?').toUpperCase())+'</div>'+
+        '<div class="bal-info">'+
+          '<div class="bal-name">'+esc(b.name)+
+            (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+'</div>'+
+          '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.share)+'</div>'+
+        '</div>'+
+        '<span class="pill '+bcls+'">'+btext+'</span>'+
+        '</div>';
+    });
+    h += '</div>';
+  }
+
+  // --- Transfers (who pays whom) ---
+  if(transfers.length > 0){
+    h += '<div class="tab-count" style="margin-top:14px;">Who pays whom</div>';
+    h += '<div class="transfer-list">';
+    transfers.forEach(function(tr){
+      h += '<div class="transfer-row">'+
+        '<span class="transfer-name">'+esc(tr.from_name)+'</span>'+
+        '<svg class="transfer-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>'+
+        '<span class="transfer-name">'+esc(tr.to_name)+'</span>'+
+        '<span class="transfer-amount">'+money(tr.amount)+'</span>'+
+        '</div>';
+    });
+    h += '</div>';
+  }else if(total > 0){
+    h += '<div style="font-size:13px;color:var(--c-text-2);text-align:center;'+
+      'margin-top:14px;">Everyone is settled up.</div>';
+  }
+
+  // --- Admin actions: settle / unsettle ---
+  if(t.is_admin && total > 0){
+    if(t.settled){
+      h += '<div style="margin-top:20px;">'+
+        '<button class="btn btn-secondary" id="btn-unsettle" style="margin-top:0;">'+
+        '🔓 Reopen this trip</button></div>';
+    }else{
+      h += '<div style="margin-top:20px;">'+
+        '<button class="btn btn-primary" id="btn-settle" style="margin-top:0;background:var(--c-success);">'+
+        '🔒 Settle this trip</button></div>';
+    }
+  }
+
+  $('tab-settlement').innerHTML = h;
+  var bs = $('btn-settle'); if(bs) bs.onclick = doSettle;
+  var bu = $('btn-unsettle'); if(bu) bu.onclick = doUnsettle;
+}
+
+async function doSettle(){
+  if(!confirm('Settle this trip? This will lock all expenses and member changes.')) return;
+  overlay('Settling…');
+  try{
+    var res=await sb.rpc('settle_trip',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    await reloadTrip();
+    state.settlementLoadedFor=null;  // force settlement reload (settled flag changed)
+    await loadSettlement();
+    overlayOff();
+    toast('Trip settled');
+  }catch(err){
+    overlayOff();
+    toast(err.message||'Could not settle',true);
+  }
+}
+async function doUnsettle(){
+  if(!confirm('Reopen this trip? Expenses and members can be changed again.')) return;
+  overlay('Reopening…');
+  try{
+    var res=await sb.rpc('unsettle_trip',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    await reloadTrip();
+    state.settlementLoadedFor=null;
+    await loadSettlement();
+    overlayOff();
+    toast('Trip reopened');
+  }catch(err){
+    overlayOff();
+    toast(err.message||'Could not reopen',true);
+  }
+}
+
+// ----- Add Person modal -----
+var apSearchTimer=null;
+function openAddPerson(){
+  $('ap-search').value='';
+  $('ap-first').value='';
+  $('ap-last').value='';
+  $('ap-email').value='';
+  $('ap-msg').className='msg';
+  hide('ap-results');
+  openModal('modal-add-person');
+  setTimeout(function(){ $('ap-search').focus(); },150);
+}
+function setApMsg(type,text){
+  var m=$('ap-msg'); m.className='msg show '+type; m.textContent=text;
+}
+async function runDirectorySearch(q){
+  if(!q || q.length<1){ hide('ap-results'); return; }
+  try{
+    var res=await sb.rpc('search_directory',
+      { p_query:q, p_exclude_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    var rows=res.data||[];
+    if(rows.length===0){ hide('ap-results'); return; }
+    var h='';
+    rows.forEach(function(r){
+      var nm=((r.first_name||'')+' '+(r.last_name||'')).trim()||(r.email||'');
+      h += '<div class="ap-result" data-dir="'+r.directory_id+
+        '" data-first="'+esc(r.first_name||'')+
+        '" data-last="'+esc(r.last_name||'')+
+        '" data-email="'+esc(r.email||'')+'">'+
+        '<div class="person-avatar" style="width:30px;height:30px;font-size:12px;">'+
+        esc(initials(r))+'</div>'+
+        '<div class="ap-result-main">'+
+          '<div class="ap-result-name">'+esc(nm)+'</div>'+
+          (r.email ? '<div class="ap-result-email">'+esc(r.email)+'</div>' : '')+
+        '</div></div>';
+    });
+    $('ap-results').innerHTML=h;
+    show('ap-results');
+  }catch(err){
+    hide('ap-results');
+  }
+}
+async function saveAddPerson(){
+  var dirId = $('ap-results').dataset.pickedDir || null;
+  var first = $('ap-first').value.trim();
+  var last  = $('ap-last').value.trim();
+  var email = $('ap-email').value.trim();
+  if(!dirId && !first && !email){
+    setApMsg('err','Pick someone from the directory, or enter a name/email.');
+    return;
+  }
+  var btn=$('ap-save');
+  btn.disabled=true; btn.textContent='Adding…';
+  try{
+    var res=await sb.rpc('add_person_to_trip',{
+      p_trip: state.trip.trip_id,
+      p_directory_id: dirId,
+      p_email: email||null,
+      p_first_name: first||null,
+      p_last_name: last||null
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-add-person');
+    toast('Added');
+    await reloadTrip();
+  }catch(err){
+    setApMsg('err', err.message||'Could not add person.');
+  }
+  btn.disabled=false; btn.textContent='Add';
+}
+
+// ---- New trip ----
+function openNewTrip(){
+  $('nt-name').value='';
+  $('nt-msg').className='msg';
+  openModal('modal-new-trip');
+  setTimeout(function(){ $('nt-name').focus(); },150);
+}
+async function createTrip(){
+  var name=$('nt-name').value.trim();
+  if(!name){
+    $('nt-msg').className='msg show err';
+    $('nt-msg').textContent='Please enter a trip name.';
+    return;
+  }
+  overlay('Creating trip…');
+  try{
+    var res=await sb.rpc('create_trip',{ p_name:name });
+    if(res.error) throw res.error;
+    closeModal('modal-new-trip');
+    overlayOff();
+    toast('Trip created');
+    await loadTrips();
+  }catch(err){
+    overlayOff();
+    $('nt-msg').className='msg show err';
+    $('nt-msg').textContent=err.message||'Could not create trip.';
+  }
+}
+
+// ---- Account ----
+function openAccount(){
+  $('acc-email').textContent=state.profile?state.profile.email:'';
+  $('acc-role').textContent=state.profile&&state.profile.is_global_admin
+    ? 'Global administrator' : 'Member';
+  openModal('modal-account');
+}
+async function doSignOut(){
+  overlay('Signing out…');
+  await sb.auth.signOut();
+  overlayOff();
+  closeModal('modal-account');
+  // onAuthStateChange clears the session; we then show the email screen.
+  showAuth();
+}
+
+// ---- Change PIN ----
+function openChangePin(){
+  $('cp-old').value=''; $('cp-new').value=''; $('cp-new2').value='';
+  $('cp-msg').className='msg';
+  closeModal('modal-account');
+  openModal('modal-change-pin');
+  setTimeout(function(){ $('cp-old').focus(); },150);
+}
+async function saveChangePin(){
+  var oldP=$('cp-old').value, n1=$('cp-new').value, n2=$('cp-new2').value;
+  function cpMsg(type,text){ $('cp-msg').className='msg show '+type; $('cp-msg').textContent=text; }
+  if(!/^\d{4}$/.test(oldP)){ cpMsg('err','Enter your current 4-digit PIN.'); return; }
+  if(!/^\d{4}$/.test(n1)){ cpMsg('err','New PIN must be exactly 4 digits.'); return; }
+  if(n1!==n2){ cpMsg('err','The new PINs don\'t match.'); return; }
+  if(n1===oldP){ cpMsg('err','New PIN must be different from the current one.'); return; }
+  var btn=$('cp-save');
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    var res=await sb.rpc('set_pin',{ p_new_pin:n1, p_old_pin:oldP });
+    if(res.error) throw res.error;
+    closeModal('modal-change-pin');
+    toast('PIN changed');
+  }catch(err){
+    cpMsg('err',err.message||'Could not change PIN.');
+  }
+  btn.disabled=false; btn.textContent='Save';
+}
+
+// ============================================================
+//  ROUTING
+// ============================================================
+// enterApp() runs only AFTER the PIN (or PIN setup) has been passed.
+async function enterApp(){
+  try{
+    var res=await sb.from('profiles').select('*')
+      .eq('id',state.session.user.id).single();
+    if(res.error) throw res.error;
+    state.profile=res.data;
+  }catch(err){
+    // Profile may lag right after first signup — retry once.
+    await new Promise(function(r){ setTimeout(r,800); });
+    var res2=await sb.from('profiles').select('*')
+      .eq('id',state.session.user.id).single();
+    state.profile=res2.data||{ email:state.session.user.email, is_global_admin:false };
+  }
+  var nm=((state.profile.first_name||'')+' '+(state.profile.last_name||'')).trim()
+    || state.profile.email;
+  var initial=(nm[0]||'?').toUpperCase();
+  $('avatar').textContent=initial;
+  $('avatar-2').textContent=initial;
+  hide('view-auth');
+  show('view-trips');
+  loadTrips();
+}
+
+// Show the auth screen starting at the email step.
+function showAuth(){
+  hide('view-trips');
+  show('view-auth');
+  authFlow={ email:'', mode:'' };
+  renderAuthEmail();
+}
+
+// Called on boot when a Supabase session already exists on this device.
+// The user is "known" but must still pass the PIN lock screen.
+async function resumeWithSession(){
+  show('view-auth');
+  hide('view-trips');
+  var email=(state.session.user&&state.session.user.email||'').toLowerCase();
+  authFlow={ email:email, mode:'pin' };
+  try{
+    var st=await sb.rpc('pin_status',{ p_email:email });
+    var status=(st.data&&st.data[0])||{ has_pin:false, locked:false };
+    if(!status.has_pin){
+      // Signed in but never set a PIN — go straight to setup.
+      renderAuthSetPin(false);
+    }else if(status.locked){
+      renderAuthLocked(status.locked_until);
+    }else{
+      renderAuthPin();
+    }
+  }catch(err){
+    // If the status check fails, fall back to the email screen.
+    showAuth();
+  }
+}
+
+// ============================================================
+//  WIRING
+// ============================================================
+$('auth-ver').textContent='Shared Expenses · '+APP_VERSION;
+$('fab-new-trip').onclick=openNewTrip;
+$('btn-account').onclick=openAccount;
+$('btn-account-2').onclick=openAccount;
+$('nt-cancel').onclick=function(){ closeModal('modal-new-trip'); };
+$('nt-create').onclick=createTrip;
+$('nt-name').addEventListener('keydown',function(e){
+  if(e.key==='Enter') createTrip();
+});
+$('acc-close').onclick=function(){ closeModal('modal-account'); };
+$('acc-signout').onclick=doSignOut;
+$('acc-change-pin').onclick=openChangePin;
+$('cp-cancel').onclick=function(){ closeModal('modal-change-pin'); };
+$('cp-save').onclick=saveChangePin;
+$('cp-new2').addEventListener('keydown',function(e){
+  if(e.key==='Enter') saveChangePin();
+});
+['modal-new-trip','modal-account','modal-change-pin','modal-add-person','modal-expense'].forEach(function(id){
+  $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
+});
+
+// Expense modal wiring
+$('ex-cancel').onclick = function(){ closeModal('modal-expense'); };
+$('ex-save').onclick   = saveExpense;
+$('ex-delete').onclick = deleteExpense;
+// In edit mode, the Save button stays disabled until the form really changes.
+['ex-desc','ex-amount','ex-paid-by'].forEach(function(id){
+  $(id).addEventListener('input', checkExpenseChanged);
+  $(id).addEventListener('change', checkExpenseChanged);
+});
+$('ex-split-list').addEventListener('change', checkExpenseChanged);
+document.querySelectorAll('input[name="ex-split"]').forEach(function(r){
+  r.onchange = function(){
+    $('ex-split-list').hidden = (r.value !== 'custom') || !r.checked;
+    if(document.querySelector('input[name="ex-split"]:checked').value === 'custom'){
+      $('ex-split-list').hidden = false;
+    }else{
+      $('ex-split-list').hidden = true;
+    }
+    checkExpenseChanged();
+  };
+});
+
+// Trip detail wiring
+$('td-back').onclick = function(){
+  hide('view-trip');
+  show('view-trips');
+  state.trip=null;
+  loadTrips();   // refresh trip list (counts may have changed)
+};
+document.querySelectorAll('#view-trip .tab').forEach(function(t){
+  t.onclick = function(){
+    setActiveTab(t.dataset.tab);
+    renderActiveTab();
+  };
+});
+
+// Add-person modal wiring
+$('ap-cancel').onclick = function(){ closeModal('modal-add-person'); };
+$('ap-save').onclick   = saveAddPerson;
+$('ap-search').addEventListener('input', function(){
+  // Typing in search clears any previous directory pick
+  $('ap-results').dataset.pickedDir = '';
+  $('ap-first').value=''; $('ap-last').value=''; $('ap-email').value='';
+  var q = $('ap-search').value.trim();
+  clearTimeout(apSearchTimer);
+  apSearchTimer = setTimeout(function(){ runDirectorySearch(q); }, 220);
+});
+$('ap-results').addEventListener('click', function(ev){
+  var r = ev.target.closest('[data-dir]');
+  if(!r) return;
+  $('ap-results').dataset.pickedDir = r.dataset.dir;
+  $('ap-first').value = r.dataset.first || '';
+  $('ap-last').value  = r.dataset.last  || '';
+  $('ap-email').value = r.dataset.email || '';
+  $('ap-search').value = ($('ap-first').value+' '+$('ap-last').value).trim() || $('ap-email').value;
+  hide('ap-results');
+});
+// When manual fields are edited, the search-result pick is forgotten
+['ap-first','ap-last','ap-email'].forEach(function(id){
+  $(id).addEventListener('input', function(){
+    $('ap-results').dataset.pickedDir = '';
+  });
+});
+
+// ============================================================
+//  BOOT
+// ============================================================
+async function boot(){
+  var res=await sb.auth.getSession();
+  state.session = (res.data && res.data.session) || null;
+  if(state.session){
+    // Known device — show the PIN lock screen (or setup).
+    resumeWithSession();
+  }else{
+    showAuth();
+  }
+  // React to sign-out elsewhere. We deliberately do NOT auto-enter the app
+  // on SIGNED_IN here — entering happens only after the PIN step.
+  sb.auth.onAuthStateChange(function(event,session){
+    state.session=session;
+    if(event==='SIGNED_OUT'){ showAuth(); }
+  });
+}
+boot();
+
+})();
+</script>
+
+</body>
+</html>
