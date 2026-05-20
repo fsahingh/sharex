@@ -136,6 +136,42 @@
   .icon-btn-sm.danger{color:var(--c-danger);}
   .icon-btn-sm svg{width:16px;height:16px;}
 
+  /* ---- EXPENSE CARD (Expenses tab) ---- */
+  .exp-card{background:var(--c-card);border-radius:var(--r);margin-bottom:8px;
+    box-shadow:var(--shadow);overflow:hidden;}
+  .exp-row{display:flex;align-items:center;padding:13px 14px;width:100%;
+    text-align:left;cursor:pointer;}
+  .exp-row:active{background:var(--c-bg);}
+  .exp-left{flex:1;min-width:0;}
+  .exp-desc{font-size:15px;font-weight:600;}
+  .exp-meta{font-size:12px;color:var(--c-text-2);margin-top:2px;}
+  .exp-amount{font-size:16px;font-weight:700;flex-shrink:0;margin-left:10px;}
+  .exp-chevron{margin-left:8px;color:var(--c-text-3);flex-shrink:0;
+    transition:transform .15s;}
+  .exp-chevron svg{width:16px;height:16px;}
+  .exp-chevron.open{transform:rotate(180deg);}
+  .exp-split-panel{padding:0 14px 14px;border-top:0.5px solid var(--c-border);}
+  .exp-split-head{font-size:11px;font-weight:600;color:var(--c-text-3);
+    text-transform:uppercase;letter-spacing:.3px;padding:10px 0 6px;}
+  .exp-split-line{display:flex;justify-content:space-between;align-items:center;
+    padding:6px 0;font-size:14px;}
+  .exp-split-line .sub{color:var(--c-text-2);font-size:13px;}
+
+  /* ---- EXPENSE MODAL — split list ---- */
+  .ex-split-mode{display:flex;gap:8px;margin-top:4px;}
+  .ex-radio{flex:1;display:flex;align-items:center;justify-content:center;
+    gap:6px;padding:9px;border:1px solid var(--c-border);border-radius:var(--r-sm);
+    background:var(--c-bg);font-size:13px;font-weight:500;cursor:pointer;}
+  .ex-radio input{margin:0;accent-color:var(--c-tint);}
+  .ex-radio:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);color:var(--c-tint);}
+  #ex-split-list{margin-top:10px;border:1px solid var(--c-border);
+    border-radius:var(--r-sm);max-height:240px;overflow-y:auto;}
+  .ex-split-row{display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border-bottom:0.5px solid var(--c-border);}
+  .ex-split-row:last-child{border-bottom:none;}
+  .ex-split-row input{width:20px;height:20px;accent-color:var(--c-tint);flex-shrink:0;}
+  .ex-split-row-name{flex:1;font-size:14px;}
+
   /* ---- TRIP CARDS ---- */
   .trip-card{background:var(--c-card);border-radius:var(--r);margin-bottom:12px;
     box-shadow:var(--shadow);overflow:hidden;}
@@ -302,6 +338,35 @@
   </div>
 </div>
 
+<!-- ======================= EXPENSE MODAL (add / edit) ======================= -->
+<div class="modal" id="modal-expense" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="ex-title">Add Expense</div>
+    <div class="modal-body">
+      <label for="ex-desc">Description</label>
+      <input type="text" id="ex-desc" class="field" placeholder="e.g. Dinner" maxlength="80">
+      <label for="ex-amount">Amount ($)</label>
+      <input type="number" id="ex-amount" class="field" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00">
+      <label for="ex-paid-by">Paid by</label>
+      <select id="ex-paid-by" class="field"></select>
+      <label style="margin-top:14px;">Split between</label>
+      <div class="ex-split-mode">
+        <label class="ex-radio"><input type="radio" name="ex-split" value="everyone" checked> Everyone</label>
+        <label class="ex-radio"><input type="radio" name="ex-split" value="custom"> Custom</label>
+      </div>
+      <div id="ex-split-list" hidden></div>
+      <div class="msg" id="ex-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ex-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;font-size:20px;">×</button>
+      <button class="btn btn-secondary" id="ex-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ex-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= NEW TRIP MODAL ======================= -->
 <div class="modal" id="modal-new-trip" hidden>
   <div class="modal-backdrop"></div>
@@ -377,7 +442,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-0.6';
+var APP_VERSION = 'V2-0.7';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -754,8 +819,9 @@ async function openTrip(tripId){
   hide('view-trips');
   show('view-trip');
   $('td-name').textContent = '';
-  // Reset to settlement tab on entry
   state.activeTab='settlement';
+  state.expandedExpense = null;
+  state.expensesLoadedFor = null;       // force expenses reload on first visit
   setActiveTab('settlement');
   $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   $('tab-expenses').innerHTML='';
@@ -781,22 +847,34 @@ function setActiveTab(name){
   ['settlement','expenses','people'].forEach(function(n){
     $('tab-'+n).hidden = (n!==name);
   });
-  // FAB visibility: People shows + (add person). Others, later.
+  // FAB visibility: People (add member) and Expenses (add expense).
   var fab=$('td-fab');
-  if(name==='people' && state.trip && state.trip.is_admin && !state.trip.settled){
-    show('td-fab');
-    fab.onclick=openAddPerson;
+  if(!state.trip || state.trip.settled){
+    hide('td-fab'); fab.onclick=null; return;
+  }
+  if(name==='people' && state.trip.is_admin){
+    show('td-fab'); fab.onclick=openAddPerson;
+  }else if(name==='expenses'){
+    show('td-fab'); fab.onclick=function(){ openExpenseModal(null); };
   }else{
-    hide('td-fab');
-    fab.onclick=null;
+    hide('td-fab'); fab.onclick=null;
   }
 }
 
 function renderActiveTab(){
-  if(state.activeTab==='people')   renderPeopleTab();
-  if(state.activeTab==='expenses') renderExpensesTab();
-  if(state.activeTab==='settlement') renderSettlementTab();
-  // Re-apply FAB rules for current tab + fresh data
+  if(state.activeTab==='people'){
+    renderPeopleTab();
+  }else if(state.activeTab==='expenses'){
+    // Expenses are loaded lazily on first visit
+    if(!state.expensesLoadedFor || state.expensesLoadedFor !== state.trip.trip_id){
+      state.expensesLoadedFor = state.trip.trip_id;
+      loadExpenses();
+    }else{
+      renderExpensesTab();
+    }
+  }else if(state.activeTab==='settlement'){
+    renderSettlementTab();
+  }
   setActiveTab(state.activeTab);
 }
 
@@ -872,16 +950,240 @@ async function reloadTrip(){
   }
 }
 
-// ----- Settlement & Expenses placeholders -----
+// ----- Expenses tab -----
+state.expenses = [];
+state.expandedExpense = null;   // id of currently-expanded card
+
+async function loadExpenses(){
+  if(!state.trip) return;
+  $('tab-expenses').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res=await sb.rpc('list_trip_expenses',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    state.expenses = res.data || [];
+    renderExpensesTab();
+  }catch(err){
+    $('tab-expenses').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load expenses</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function renderExpensesTab(){
+  var el=$('tab-expenses');
+  var t=state.trip;
+  if(!t) return;
+  var list=state.expenses||[];
+  if(list.length===0){
+    el.innerHTML =
+      '<div class="empty"><div class="empty-title">No expenses yet</div>'+
+      '<div class="empty-sub">Tap + to add your first expense.</div></div>';
+    return;
+  }
+  // Name lookup for split rendering
+  var nameById={};
+  (t.members||[]).forEach(function(m){ nameById[m.directory_id]=displayName(m); });
+
+  var h = '<div class="tab-count">'+list.length+' '+(list.length===1?'expense':'expenses')+'</div>';
+  list.forEach(function(e){
+    var splitIds = e.split_ids || [];
+    var perPerson = splitIds.length ? (Number(e.amount)/splitIds.length) : 0;
+    var open = (state.expandedExpense === e.expense_id);
+    h += '<div class="exp-card">'+
+      '<button class="exp-row" data-toggle="'+e.expense_id+'">'+
+        '<div class="exp-left">'+
+          '<div class="exp-desc">'+esc(e.description)+'</div>'+
+          '<div class="exp-meta">Paid by '+esc(e.paid_by_name||'?')+' · split '+
+            splitIds.length+' '+(splitIds.length===1?'way':'ways')+'</div>'+
+        '</div>'+
+        '<span class="exp-amount">'+money(Number(e.amount))+'</span>'+
+        '<span class="exp-chevron'+(open?' open':'')+'">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'+
+        '</span>'+
+      '</button>';
+    if(open){
+      h += '<div class="exp-split-panel">'+
+        '<div class="exp-split-head">Split between</div>';
+      splitIds.forEach(function(sid){
+        h += '<div class="exp-split-line">'+
+          '<span>'+esc(nameById[sid]||'Unknown')+'</span>'+
+          '<span class="sub">'+money(perPerson)+'</span>'+
+          '</div>';
+      });
+      if(t.is_admin && !t.settled){
+        h += '<div style="display:flex;gap:8px;margin-top:10px;">'+
+          '<button class="btn btn-secondary" data-edit="'+e.expense_id+'" style="margin-top:0;">Edit</button>'+
+          '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+  el.innerHTML = h;
+  el.onclick = function(ev){
+    var ed = ev.target.closest('[data-edit]');
+    if(ed){ openExpenseModal(ed.dataset.edit); return; }
+    var tg = ev.target.closest('[data-toggle]');
+    if(tg){
+      var id = tg.dataset.toggle;
+      state.expandedExpense = (state.expandedExpense === id) ? null : id;
+      renderExpensesTab();
+    }
+  };
+}
+
+// ----- Expense modal -----
+state.expenseEditingId = null;
+state.expenseOriginal  = null;
+
+function openExpenseModal(expenseId){
+  var t = state.trip;
+  if(!t || t.settled) return;
+  state.expenseEditingId = expenseId || null;
+  state.expenseOriginal  = null;
+
+  // Populate Paid-by dropdown with trip members
+  var sel = $('ex-paid-by');
+  sel.innerHTML='';
+  var ph=document.createElement('option');
+  ph.value=''; ph.textContent='— Select who paid —'; sel.appendChild(ph);
+  (t.members||[]).forEach(function(m){
+    var o=document.createElement('option');
+    o.value=m.directory_id; o.textContent=displayName(m);
+    sel.appendChild(o);
+  });
+
+  // Build the per-person split list (custom mode)
+  var splitListEl=$('ex-split-list');
+  var sh='';
+  (t.members||[]).forEach(function(m){
+    sh += '<label class="ex-split-row">'+
+      '<input type="checkbox" data-mid="'+m.directory_id+'" checked>'+
+      '<span class="ex-split-row-name">'+esc(displayName(m))+'</span>'+
+      '</label>';
+  });
+  splitListEl.innerHTML = sh;
+  splitListEl.hidden = true;
+
+  // Reset fields
+  $('ex-msg').className='msg';
+  document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
+
+  if(expenseId){
+    // EDIT mode — fill from existing expense
+    var exp = (state.expenses||[]).find(function(e){ return e.expense_id===expenseId; });
+    if(!exp){ toast('Expense not found',true); return; }
+    $('ex-title').textContent = 'Edit Expense';
+    $('ex-desc').value   = exp.description || '';
+    $('ex-amount').value = String(exp.amount);
+    $('ex-paid-by').value= exp.paid_by;
+    // Determine if split is "everyone" or custom
+    var memberIds = (t.members||[]).map(function(m){ return m.directory_id; });
+    var splitIds = (exp.split_ids||[]).map(String);
+    var isEveryone = (splitIds.length === memberIds.length) &&
+                     memberIds.every(function(id){ return splitIds.indexOf(id)>=0; });
+    if(isEveryone){
+      document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
+      splitListEl.hidden = true;
+    }else{
+      document.querySelector('input[name="ex-split"][value="custom"]').checked=true;
+      splitListEl.hidden = false;
+      document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
+        cb.checked = splitIds.indexOf(cb.dataset.mid) >= 0;
+      });
+    }
+    $('ex-delete').hidden = !(t.is_admin);
+    state.expenseOriginal = JSON.stringify(readExpenseForm());
+  }else{
+    // ADD mode
+    $('ex-title').textContent = 'Add Expense';
+    $('ex-desc').value=''; $('ex-amount').value=''; $('ex-paid-by').value='';
+    $('ex-delete').hidden = true;
+  }
+  openModal('modal-expense');
+}
+
+function readExpenseForm(){
+  var splitMode = document.querySelector('input[name="ex-split"]:checked').value;
+  var splitIds = null;
+  if(splitMode==='custom'){
+    splitIds = [];
+    document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
+      if(cb.checked) splitIds.push(cb.dataset.mid);
+    });
+  }
+  return {
+    description: $('ex-desc').value.trim(),
+    amount:      $('ex-amount').value,
+    paid_by:     $('ex-paid-by').value,
+    split_mode:  splitMode,
+    split_ids:   splitIds
+  };
+}
+
+async function saveExpense(){
+  var f = readExpenseForm();
+  function setMsg(text){ $('ex-msg').className='msg show err'; $('ex-msg').textContent=text; }
+  if(!f.description){ setMsg('Description is required.'); return; }
+  var amt = Number(f.amount);
+  if(!isFinite(amt) || amt <= 0){ setMsg('Enter a valid amount.'); return; }
+  if(!f.paid_by){ setMsg('Choose who paid.'); return; }
+  if(f.split_mode==='custom' && (!f.split_ids || f.split_ids.length===0)){
+    setMsg('Select at least one person for the split.'); return;
+  }
+  var btn=$('ex-save');
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    if(state.expenseEditingId){
+      var res=await sb.rpc('update_expense',{
+        p_expense: state.expenseEditingId,
+        p_description: f.description,
+        p_amount: amt,
+        p_paid_by: f.paid_by,
+        p_split_ids: f.split_ids
+      });
+      if(res.error) throw res.error;
+    }else{
+      var res2=await sb.rpc('add_expense',{
+        p_trip: state.trip.trip_id,
+        p_description: f.description,
+        p_amount: amt,
+        p_paid_by: f.paid_by,
+        p_split_ids: f.split_ids
+      });
+      if(res2.error) throw res2.error;
+    }
+    closeModal('modal-expense');
+    toast('Saved');
+    await loadExpenses();
+  }catch(err){
+    setMsg(err.message||'Could not save.');
+  }
+  btn.disabled=false; btn.textContent='Save';
+}
+
+async function deleteExpense(){
+  if(!state.expenseEditingId) return;
+  if(!confirm('Delete this expense? This cannot be undone.')) return;
+  var btn=$('ex-delete');
+  btn.disabled=true;
+  try{
+    var res=await sb.rpc('delete_expense',{ p_expense: state.expenseEditingId });
+    if(res.error) throw res.error;
+    closeModal('modal-expense');
+    toast('Deleted');
+    await loadExpenses();
+  }catch(err){
+    toast(err.message||'Could not delete',true);
+  }
+  btn.disabled=false;
+}
+
+// ----- Settlement placeholder -----
 function renderSettlementTab(){
   $('tab-settlement').innerHTML =
     '<div class="empty"><div class="empty-title">Settlement</div>'+
     '<div class="empty-sub">Coming next — once expenses are in place.</div></div>';
-}
-function renderExpensesTab(){
-  $('tab-expenses').innerHTML =
-    '<div class="empty"><div class="empty-title">Expenses</div>'+
-    '<div class="empty-sub">Coming next.</div></div>';
 }
 
 // ----- Add Person modal -----
@@ -1105,8 +1407,23 @@ $('cp-save').onclick=saveChangePin;
 $('cp-new2').addEventListener('keydown',function(e){
   if(e.key==='Enter') saveChangePin();
 });
-['modal-new-trip','modal-account','modal-change-pin','modal-add-person'].forEach(function(id){
+['modal-new-trip','modal-account','modal-change-pin','modal-add-person','modal-expense'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
+});
+
+// Expense modal wiring
+$('ex-cancel').onclick = function(){ closeModal('modal-expense'); };
+$('ex-save').onclick   = saveExpense;
+$('ex-delete').onclick = deleteExpense;
+document.querySelectorAll('input[name="ex-split"]').forEach(function(r){
+  r.onchange = function(){
+    $('ex-split-list').hidden = (r.value !== 'custom') || !r.checked;
+    if(document.querySelector('input[name="ex-split"]:checked').value === 'custom'){
+      $('ex-split-list').hidden = false;
+    }else{
+      $('ex-split-list').hidden = true;
+    }
+  };
 });
 
 // Trip detail wiring
