@@ -514,7 +514,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-1.4';
+var APP_VERSION = 'V2-1.5';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -701,22 +701,19 @@ async function verifyOtp(code){
       return;
     }
 
-    // New-device / first-time setup OTP.
-    // Email ownership has just been proved — that's enough to enter.
-    //  * If the user has no PIN yet, ask them to create one (first-time).
-    //  * If they already have a PIN, skip the PIN screen and go straight
-    //    into the app. PIN here would be redundant friction since the
-    //    same factor (email) gates "Forgot PIN" anyway.
+    // New-device / first-time setup OTP. We just signed the user in.
+    // Check the OWN profile directly (RLS allows reading own row) — this
+    // is more reliable than pin_status during the auth-state transition.
+    var hasPin = false;
     try{
-      var st=await sb.rpc('pin_status',{ p_email:authFlow.email });
-      var status=(st.data&&st.data[0])||{ has_pin:false };
-      if(status.has_pin){
-        enterApp();
-      }else{
-        renderAuthSetPin(false);
-      }
-    }catch(e){
+      var pr = await sb.from('profiles')
+        .select('pin_hash').eq('id', res.data.session.user.id).single();
+      if(!pr.error && pr.data) hasPin = (pr.data.pin_hash != null);
+    }catch(e){ /* fall through */ }
+    if(hasPin){
       enterApp();
+    }else{
+      renderAuthSetPin(false);
     }
   }catch(err){
     btn.disabled=false; btn.textContent='Verify';
