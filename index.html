@@ -514,7 +514,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-1.1';
+var APP_VERSION = 'V2-1.2';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -692,9 +692,28 @@ async function verifyOtp(code){
       email:authFlow.email, token:code, type:'email'
     });
     if(res.error) throw res.error;
-    // Signed in. Now the user must set a (new) PIN.
     state.session=res.data.session;
-    renderAuthSetPin(authFlow.mode==='otp-reset');
+    if(authFlow.mode==='otp-reset'){
+      // Forgot-PIN flow: wipe the old hash, then force a new-PIN setup.
+      try{ await sb.rpc('clear_pin'); }catch(e){}
+      renderAuthSetPin(true);
+    }else{
+      // Setup flow: this was a new-device or first-login OTP. If the user
+      // already has a PIN on file, send them to the PIN entry screen
+      // (they shouldn't have to re-create a PIN just because they're on
+      // a new device). Otherwise, set one up.
+      try{
+        var st=await sb.rpc('pin_status',{ p_email:authFlow.email });
+        var status=(st.data&&st.data[0])||{ has_pin:false };
+        if(status.has_pin){
+          renderAuthPin();
+        }else{
+          renderAuthSetPin(false);
+        }
+      }catch(e){
+        renderAuthSetPin(false);
+      }
+    }
   }catch(err){
     btn.disabled=false; btn.textContent='Verify';
     setAuthMsg('err','Incorrect or expired code. Try again.');
