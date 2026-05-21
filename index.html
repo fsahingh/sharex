@@ -55,6 +55,12 @@
     appearance:none;outline:none;font-family:inherit;}
   input.field:focus, select.field:focus, textarea.field:focus{
     border-color:var(--c-tint);box-shadow:0 0 0 3px rgba(10,132,255,0.15);}
+  /* "dirty" state — applied when the user changed a field from its loaded value */
+  input.field.dirty, select.field.dirty, textarea.field.dirty{
+    border-color:var(--c-warn);
+    background:rgba(255,149,0,0.10);}
+  input.field.dirty:focus, select.field.dirty:focus, textarea.field.dirty:focus{
+    box-shadow:0 0 0 3px rgba(255,149,0,0.20);}
   /* Custom chevron for select since we removed the native one */
   select.field{
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
@@ -170,12 +176,12 @@
     text-overflow:ellipsis;white-space:nowrap;}
 
   /* ---- EXPENSE MODAL — split list ---- */
-  .ex-split-mode{display:flex;gap:8px;margin-top:4px;}
-  .ex-radio{flex:1 1 0;width:0;display:flex;align-items:center;justify-content:center;
+  .ex-split-mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
+  .ex-radio{display:flex;align-items:center;justify-content:center;
     gap:8px;padding:11px 12px;border:1px solid var(--c-border);
     border-radius:var(--r-sm);background:var(--c-bg);
     font-size:14px;font-weight:500;cursor:pointer;min-height:46px;
-    box-sizing:border-box;text-align:center;}
+    box-sizing:border-box;text-align:center;min-width:0;}
   .ex-radio input{margin:0;width:16px;height:16px;flex-shrink:0;accent-color:var(--c-tint);}
   .ex-radio:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);color:var(--c-tint);}
   #ex-split-list{margin-top:10px;border:1px solid var(--c-border);
@@ -266,6 +272,17 @@
   .ts-check svg{width:18px;height:18px;}
 
   .td-name-btn:active{background:var(--c-bg);}
+  /* ---- TRIP NAME (header dropdown trigger) ---- */
+  .td-name-card{position:absolute;left:50%;top:50%;
+    transform:translate(-50%,-50%);
+    display:inline-flex;align-items:center;gap:8px;
+    padding:7px 14px;border-radius:12px;
+    background:var(--c-bg);border:1px solid var(--c-border);
+    font-size:15px;font-weight:700;color:var(--c-text);
+    font-family:inherit;cursor:pointer;
+    max-width:60%;}
+  .td-name-card:active{transform:translate(-50%,-50%) scale(0.97);}
+  .td-name-card #td-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
   /* ---- EDIT PERSON: trips list ---- */
   .ep-trip-row{display:flex;align-items:center;justify-content:space-between;
@@ -301,6 +318,11 @@
   .notif-actions .btn-reject{background:rgba(255,59,48,0.10);color:var(--c-danger);}
   .notif-actions .btn-cancel{background:var(--c-bg);color:var(--c-text);
     border:1px solid var(--c-border);}
+  .notif-card.rejected{border-left:4px solid var(--c-danger);}
+  .notif-reason{margin-top:10px;padding:10px 12px;border-radius:10px;
+    background:rgba(255,59,48,0.10);color:var(--c-text);font-size:13px;
+    line-height:1.4;}
+  .notif-reason strong{color:var(--c-danger);}
 
   /* ---- TRIP CARDS ---- */
   .trip-card{background:var(--c-card);border-radius:var(--r);margin-bottom:12px;
@@ -442,9 +464,9 @@
     <button class="icon-btn" id="td-back" title="Trips">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
     </button>
-    <button class="header-title td-name-btn" id="td-name" style="flex:1;font-size:16px;background:none;border:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:inherit;cursor:pointer;font-weight:700;padding:6px 8px;border-radius:8px;font-family:inherit;">
+    <button class="td-name-card" id="td-name">
       <span id="td-name-text"></span>
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
     <div class="header-right">
       <button class="icon-btn" id="btn-directory-2" title="Directory" hidden>
@@ -560,6 +582,25 @@
   </div>
 </div>
 
+<!-- ======================= REJECT REQUEST MODAL ======================= -->
+<div class="modal" id="modal-reject" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Reject request</div>
+    <div class="modal-body">
+      <label for="rj-reason">Reason (optional)</label>
+      <textarea id="rj-reason" class="field" rows="3" maxlength="300"
+        placeholder="Why are you rejecting this? The requester will see this." style="resize:vertical;min-height:80px;font-family:inherit;"></textarea>
+      <div class="msg" id="rj-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="rj-cancel">Cancel</button>
+      <button class="btn btn-primary" id="rj-submit" style="background:var(--c-danger);">Reject</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= TRIP SWITCHER ======================= -->
 <div class="modal" id="modal-trip-switch" hidden>
   <div class="modal-backdrop"></div>
@@ -653,7 +694,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.7';
+var APP_VERSION = 'V2-2.8';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1778,6 +1819,9 @@ async function openEditPerson(dirId){
   state.editingPerson = null;
   state.editPersonOriginal = null;
   $('ep-first').value=''; $('ep-last').value=''; $('ep-email').value='';
+  ['ep-first','ep-last','ep-email'].forEach(function(id){
+    $(id).classList.remove('dirty');
+  });
   $('ep-msg').className='msg';
   hide('ep-email-note');
   hide('ep-trips-section');
@@ -1841,8 +1885,13 @@ function readEditPersonForm(){
 
 function checkEditPersonChanged(){
   if(!state.editPersonOriginal) return;
-  var now = JSON.stringify(readEditPersonForm());
-  $('ep-save').disabled = (now === state.editPersonOriginal);
+  var orig = JSON.parse(state.editPersonOriginal);
+  var cur = readEditPersonForm();
+  // Per-field dirty highlighting (orange).
+  $('ep-first').classList.toggle('dirty', cur.first !== orig.first);
+  $('ep-last').classList.toggle('dirty',  cur.last  !== orig.last);
+  $('ep-email').classList.toggle('dirty', cur.email !== orig.email);
+  $('ep-save').disabled = (JSON.stringify(cur) === state.editPersonOriginal);
 }
 
 async function saveEditPerson(){
@@ -1962,19 +2011,35 @@ function renderNotifs(){
   });
   // ---- Change requests ----
   list.forEach(function(r){
+    var isRejected = (r.status === 'rejected');
     var isEdit = r.request_type === 'edit';
-    var headTxt = isEdit ? 'Edit request' : 'Delete request';
+    var headTxt;
+    if(isRejected){
+      headTxt = isEdit ? 'Edit request rejected' : 'Delete request rejected';
+    }else{
+      headTxt = isEdit ? 'Edit request' : 'Delete request';
+    }
     var who = r.requested_by_me ? 'You' : r.requester_name;
-    h += '<div class="notif-card">'+
+    h += '<div class="notif-card'+(isRejected?' rejected':'')+'">'+
       '<div class="notif-head">'+headTxt+'</div>'+
-      '<div class="notif-trip">'+esc(r.trip_name)+'</div>'+
-      '<div class="notif-title">'+esc(r.current.description)+
+      '<div class="notif-trip">'+esc(r.trip_name)+'</div>';
+    // Current values aren't returned for rejected ones (the expense may
+    // have changed since). Use the snapshot instead.
+    var cur = r.current;
+    if(!cur && r.old_snapshot){
+      cur = {
+        description: r.old_snapshot.description,
+        amount: r.old_snapshot.amount,
+        paid_by: r.old_snapshot.paid_by
+      };
+    }
+    cur = cur || { description:'(unknown)', amount:0 };
+    h += '<div class="notif-title">'+esc(cur.description)+
         ' <span style="color:var(--c-text-2);font-weight:500;">— '+
-        money(Number(r.current.amount)||0)+'</span></div>'+
+        money(Number(cur.amount)||0)+'</span></div>'+
       '<div class="notif-sub">Requested by '+esc(who)+'</div>';
-    if(isEdit){
+    if(isEdit && !isRejected){
       var p = r.proposed || {};
-      var cur = r.current || {};
       var rows = '';
       if(p.description && p.description !== cur.description){
         rows += '<div class="notif-diff-row"><span class="lbl">Description</span>'+
@@ -1996,8 +2061,15 @@ function renderNotifs(){
       }
       if(rows){ h += '<div class="notif-diff">'+rows+'</div>'; }
     }
+    if(isRejected && r.rejection_reason){
+      h += '<div class="notif-reason"><strong>Reason:</strong> '+esc(r.rejection_reason)+'</div>';
+    }else if(isRejected){
+      h += '<div class="notif-reason">No reason was provided.</div>';
+    }
     h += '<div class="notif-actions">';
-    if(r.i_can_decide){
+    if(isRejected && r.requested_by_me){
+      h += '<button class="btn btn-cancel" data-dismiss="'+r.id+'">Dismiss</button>';
+    }else if(r.i_can_decide){
       h += '<button class="btn btn-reject" data-reject="'+r.id+'">Reject</button>'+
            '<button class="btn btn-approve" data-approve="'+r.id+'">Approve</button>';
     }else if(r.requested_by_me){
@@ -2017,11 +2089,23 @@ function renderNotifs(){
     if(r){ doRejectRequest(r.dataset.reject); return; }
     var c = ev.target.closest('[data-cancel]');
     if(c){ doCancelRequest(c.dataset.cancel); return; }
+    var d = ev.target.closest('[data-dismiss]');
+    if(d){ doDismissNotif(d.dataset.dismiss); return; }
   };
 }
 
+async function doDismissNotif(id){
+  try{
+    var res = await sb.rpc('dismiss_my_request_notification',{ p_req:id });
+    if(res.error) throw res.error;
+    await refreshNotifs();
+    renderNotifs();
+  }catch(err){
+    toast(err.message || 'Could not dismiss', true);
+  }
+}
+
 async function doApproveAccess(id){
-  if(!confirm('Approve this access request? The user will be able to sign in.')) return;
   try{
     var res = await sb.rpc('approve_access_request',{ p_req:id });
     if(res.error) throw res.error;
@@ -2033,7 +2117,6 @@ async function doApproveAccess(id){
   }
 }
 async function doRejectAccess(id){
-  if(!confirm('Reject this access request?')) return;
   try{
     var res = await sb.rpc('reject_access_request',{ p_req:id });
     if(res.error) throw res.error;
@@ -2046,7 +2129,7 @@ async function doRejectAccess(id){
 }
 
 async function doApproveRequest(id){
-  if(!confirm('Approve this change?')) return;
+  // Approve is a single decisive action — no extra confirm prompt.
   try{
     var res = await sb.rpc('approve_expense_request',{ p_req:id });
     if(res.error) throw res.error;
@@ -2062,18 +2145,37 @@ async function doApproveRequest(id){
   }
 }
 
-async function doRejectRequest(id){
-  var reason = prompt('Optional: reason for rejecting?');
-  if(reason === null) return;   // user cancelled
+// Reject opens a modal so the admin can type a reason that is then shown
+// to the requester as a notification.
+state.rejectingRequestId = null;
+function doRejectRequest(id){
+  state.rejectingRequestId = id;
+  $('rj-reason').value = '';
+  $('rj-msg').className = 'msg';
+  openModal('modal-reject');
+  setTimeout(function(){ $('rj-reason').focus(); }, 150);
+}
+async function submitReject(){
+  if(!state.rejectingRequestId) return;
+  var reason = $('rj-reason').value.trim();
+  var btn = $('rj-submit');
+  btn.disabled = true; btn.textContent = 'Rejecting…';
   try{
-    var res = await sb.rpc('reject_expense_request',{ p_req:id, p_reason:reason||null });
+    var res = await sb.rpc('reject_expense_request',{
+      p_req: state.rejectingRequestId,
+      p_reason: reason || null
+    });
     if(res.error) throw res.error;
+    closeModal('modal-reject');
+    state.rejectingRequestId = null;
     toast('Rejected');
     await refreshNotifs();
     renderNotifs();
   }catch(err){
-    toast(err.message || 'Could not reject', true);
+    $('rj-msg').className = 'msg show err';
+    $('rj-msg').textContent = err.message || 'Could not reject.';
   }
+  btn.disabled = false; btn.textContent = 'Reject';
 }
 
 async function doCancelRequest(id){
@@ -2185,13 +2287,35 @@ async function enterApp(){
   $('btn-directory-3').hidden = !showDir;
   hide('view-auth');
   refreshNotifs();
+  startNotifsPolling();
   // Restore whichever screen the user last viewed (URL hash). Falls back
   // to the trips list when there's nothing to restore.
   applyRoute();
 }
 
+// Light polling — the notification badge updates on its own without the
+// user having to open the bell. 30s feels fast enough without being noisy.
+function startNotifsPolling(){
+  stopNotifsPolling();
+  state.notifsInterval = setInterval(function(){
+    if(state.session){
+      refreshNotifs().then(function(){
+        // If the modal is open, re-render so any new items appear live.
+        if(!$('modal-notif').hidden) renderNotifs();
+      });
+    }
+  }, 30000);
+}
+function stopNotifsPolling(){
+  if(state.notifsInterval){
+    clearInterval(state.notifsInterval);
+    state.notifsInterval = null;
+  }
+}
+
 // Show the auth screen starting at the email step.
 function showAuth(){
+  stopNotifsPolling();
   // Clear the route so refreshing the sign-in page doesn't try to restore
   // a screen the (now signed-out) user can't see.
   if(window.location.hash){
@@ -2233,6 +2357,9 @@ $('acc-signout').onclick=doSignOut;
 // Trip-switcher (header trip name dropdown)
 $('td-name').onclick = openTripSwitcher;
 $('ts-close').onclick = function(){ closeModal('modal-trip-switch'); };
+// Reject-request modal wiring
+$('rj-cancel').onclick = function(){ closeModal('modal-reject'); state.rejectingRequestId=null; };
+$('rj-submit').onclick = submitReject;
 // Edit-person modal wiring
 $('ep-cancel').onclick=function(){ closeModal('modal-edit-person'); };
 $('ep-save').onclick=saveEditPerson;
@@ -2241,7 +2368,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch'].forEach(function(id){
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
