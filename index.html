@@ -425,6 +425,12 @@
   .modal-actions{display:flex;gap:10px;padding-top:12px;position:sticky;bottom:0;
     background:var(--c-surface);margin-top:auto;}
   .modal-actions .btn{margin-top:0;flex:1;}
+  /* Centered popup variant (used for confirm/alert dialogs). */
+  .modal.modal-center{align-items:center;}
+  .modal-center .modal-sheet.modal-card{border-radius:16px;max-width:340px;
+    width:calc(100% - 40px);padding:22px 20px calc(20px + var(--safe-b));
+    animation:fadeIn .15s ease-out;}
+  @keyframes fadeIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
 
   /* ---- MISC ---- */
   .spinner{width:24px;height:24px;border:2.5px solid var(--c-border);
@@ -770,6 +776,21 @@
   </div>
 </div>
 
+<!-- ======================= GENERIC CONFIRM DIALOG ======================= -->
+<!-- Centered modal used in place of native confirm()/alert(). Resolved
+     via the alertModal() helper which returns a Promise. -->
+<div class="modal modal-center" id="modal-dialog" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet modal-card">
+    <div class="modal-title" id="dlg-title">Confirm</div>
+    <div class="modal-body" id="dlg-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="dlg-cancel">Cancel</button>
+      <button class="btn btn-primary" id="dlg-ok">OK</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -780,7 +801,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-3.1';
+var APP_VERSION = 'V2-3.2';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -827,6 +848,41 @@ function toast(text, isErr){
   t.className='toast show'+(isErr?' err':'');
   clearTimeout(toastTimer);
   toastTimer=setTimeout(function(){ t.className='toast'; },2600);
+}
+
+// Centered confirm/alert dialog. Always returns a Promise.
+//   alertModal("Are you sure?", { confirm:true })           -> Promise<boolean>
+//   alertModal("Saved", { confirm:false })                  -> Promise<true> (info dismiss)
+//   alertModal("Delete?", { confirm:true, danger:true, confirmLabel:'Delete' })
+// Multiple lines: the message can use "\n" — we render it preserving breaks.
+function alertModal(message, opts){
+  opts = opts || {};
+  var isConfirm = opts.confirm !== false;
+  var danger = !!opts.danger;
+  return new Promise(function(resolve){
+    $('dlg-title').textContent = opts.title || (isConfirm ? 'Confirm' : 'Notice');
+    var safe = esc(message||'').replace(/\n/g,'<br>');
+    $('dlg-body').innerHTML = '<div style="font-size:14px;line-height:1.45;color:var(--c-text);">'+safe+'</div>';
+    var okBtn = $('dlg-ok');
+    var cxBtn = $('dlg-cancel');
+    okBtn.textContent = opts.confirmLabel || (isConfirm ? 'OK' : 'OK');
+    cxBtn.textContent = opts.cancelLabel || 'Cancel';
+    cxBtn.hidden = !isConfirm;
+    // Visual emphasis for destructive actions.
+    if(danger){ okBtn.style.background = 'var(--c-danger)'; okBtn.style.color = '#fff'; }
+    else { okBtn.style.background = ''; okBtn.style.color = ''; }
+    function cleanup(answer){
+      okBtn.onclick = null;
+      cxBtn.onclick = null;
+      $('modal-dialog').querySelector('.modal-backdrop').onclick = null;
+      closeModal('modal-dialog');
+      resolve(answer);
+    }
+    okBtn.onclick = function(){ cleanup(true); };
+    cxBtn.onclick = function(){ cleanup(false); };
+    $('modal-dialog').querySelector('.modal-backdrop').onclick = function(){ cleanup(false); };
+    openModal('modal-dialog');
+  });
 }
 var overlayEl=null;
 function overlay(label){
@@ -1101,6 +1157,7 @@ async function openTripSwitcher(){
   var currentId = state.trip ? state.trip.trip_id : null;
   var isAdminHere = !!(state.trip && state.trip.is_admin);
   var isMemberHere = !!(state.trip);
+  var iAmGlobal = !!(state.profile && state.profile.is_global_admin);
   var h = '';
   // Admin actions for the current trip.
   if(state.trip && isAdminHere){
@@ -1114,12 +1171,15 @@ async function openTripSwitcher(){
         '<span>Delete trip</span>'+
       '</button>'+
       '</div>';
-    // Resign admin — only if there's another non-global trip-admin (the
-    // RPC enforces this too; we just hide the button to be polite).
-    h += '<button class="ts-singleton" data-ts-resign="1">'+
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>'+
-      '<span>Resign as admin</span>'+
-      '</button>';
+    // Resign-as-admin is for regular trip admins only — the global admin
+    // can't "resign" since their powers come from is_global_admin, not
+    // from being a trip member.
+    if(!iAmGlobal){
+      h += '<button class="ts-singleton" data-ts-resign="1">'+
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>'+
+        '<span>Resign as admin</span>'+
+        '</button>';
+    }
   }
   // Leave trip — anyone who is a member but NOT an admin.
   if(state.trip && isMemberHere && !isAdminHere){
@@ -1205,7 +1265,7 @@ async function saveRenameTrip(){
 async function confirmDeleteTrip(){
   if(!state.trip) return;
   var nm = state.trip.name;
-  if(!confirm('Delete "'+nm+'"? The trip will move to the recycle bin and be permanently removed after 3 days.')) return;
+  if(!await alertModal('Delete "'+nm+'"? The trip will move to the recycle bin and be permanently removed after 3 days.', { confirm:true, danger:true, confirmLabel:'Delete' })) return;
   try{
     var res = await sb.rpc('soft_delete_trip',{ p_trip:state.trip.trip_id });
     if(res.error) throw res.error;
@@ -1222,7 +1282,7 @@ async function confirmDeleteTrip(){
 async function submitLeaveTrip(){
   if(!state.trip) return;
   var nm = state.trip.name;
-  if(!confirm('Send a request to leave "'+nm+'"?\n\nThe trip admin must approve. If they don\'t respond within 3 days, you\'ll be removed automatically.')) return;
+  if(!await alertModal('Send a request to leave "'+nm+'"?\n\nThe trip admin must approve. If they don\'t respond within 3 days, you\'ll be removed automatically.', { confirm:true, confirmLabel:'Send' })) return;
   try{
     var res = await sb.rpc('submit_leave_request',{ p_trip:state.trip.trip_id });
     if(res.error) throw res.error;
@@ -1236,7 +1296,7 @@ async function submitLeaveTrip(){
 // ----- Resign admin -----
 async function confirmResignAdmin(){
   if(!state.trip) return;
-  if(!confirm('Step down as admin of "'+state.trip.name+'"? You\'ll stay in the trip as a regular member. This is allowed only if another non-global admin exists.')) return;
+  if(!await alertModal('Step down as admin of "'+state.trip.name+'"? You\'ll stay in the trip as a regular member. This is allowed only if another non-global admin exists.', { confirm:true, confirmLabel:'Resign' })) return;
   try{
     var res = await sb.rpc('resign_as_admin',{ p_trip:state.trip.trip_id });
     if(res.error) throw res.error;
@@ -1311,7 +1371,7 @@ async function doRestoreTrip(id){
 }
 
 async function doPurgeTrip(id){
-  if(!confirm('Permanently delete this trip and all its data? This cannot be undone.')) return;
+  if(!await alertModal('Permanently delete this trip and all its data? This cannot be undone.', { confirm:true, danger:true, confirmLabel:'Delete permanently' })) return;
   try{
     var res = await sb.rpc('hard_delete_trip',{ p_trip:id });
     if(res.error) throw res.error;
@@ -1445,7 +1505,7 @@ async function submitMakeAdmin(directoryId){
   var member=(state.trip.members||[]).find(function(m){ return m.directory_id===directoryId; });
   if(!member) return;
   var nm = displayName(member);
-  if(!confirm('Send a notification to '+nm+' to become an admin?\n\nThey can accept or decline.')) return;
+  if(!await alertModal('Send a notification to '+nm+' to become an admin?\n\nThey can accept or decline.', { confirm:true, confirmLabel:'Send' })) return;
   try{
     var res = await sb.rpc('submit_make_admin_request',{
       p_trip: state.trip.trip_id,
@@ -1481,7 +1541,7 @@ async function removePerson(directoryId){
   }else{
     msg = 'Remove '+nm+' from this trip?';
   }
-  if(!confirm(msg)) return;
+  if(!await alertModal(msg, { confirm:true, danger:true, confirmLabel:'Remove' })) return;
   overlay('Removing…');
   try{
     var res=await sb.rpc('remove_person_from_trip',
@@ -1617,7 +1677,7 @@ function renderExpensesTab(){
 }
 
 async function doRequestDelete(expenseId){
-  if(!confirm('Submit a request to delete this expense?')) return;
+  if(!await alertModal('Submit a request to delete this expense?', { confirm:true, confirmLabel:'Submit' })) return;
   try{
     var res = await sb.rpc('submit_expense_request',{
       p_expense: expenseId,
@@ -1799,7 +1859,7 @@ async function saveExpense(){
 
 async function deleteExpense(){
   if(!state.expenseEditingId) return;
-  if(!confirm('Delete this expense? This cannot be undone.')) return;
+  if(!await alertModal('Delete this expense? This cannot be undone.', { confirm:true, danger:true, confirmLabel:'Delete' })) return;
   var btn=$('ex-delete');
   btn.disabled=true;
   try{
@@ -1947,7 +2007,7 @@ function renderSettlementTab(){
 }
 
 async function doSettle(){
-  if(!confirm('Settle this trip? This will lock all expenses and member changes.')) return;
+  if(!await alertModal('Settle this trip? This will lock all expenses and member changes.', { confirm:true, confirmLabel:'Settle' })) return;
   overlay('Settling…');
   try{
     var res=await sb.rpc('settle_trip',{ p_trip:state.trip.trip_id });
@@ -1963,7 +2023,7 @@ async function doSettle(){
   }
 }
 async function doUnsettle(){
-  if(!confirm('Reopen this trip? Expenses and members can be changed again.')) return;
+  if(!await alertModal('Reopen this trip? Expenses and members can be changed again.', { confirm:true, confirmLabel:'Reopen' })) return;
   overlay('Reopening…');
   try{
     var res=await sb.rpc('unsettle_trip',{ p_trip:state.trip.trip_id });
@@ -2291,7 +2351,7 @@ async function deleteEditPerson(){
   var p = state.editingPerson;
   var nm = (p.first_name||'') + ' ' + (p.last_name||'');
   nm = nm.trim() || p.email || 'this person';
-  if(!confirm('Delete '+nm+' from the directory? This cannot be undone.')) return;
+  if(!await alertModal('Delete '+nm+' from the directory? This cannot be undone.', { confirm:true, danger:true, confirmLabel:'Delete' })) return;
   try{
     var res = await sb.rpc('delete_directory_person',{ p_dir:p.directory_id });
     if(res.error) throw res.error;
@@ -2530,12 +2590,8 @@ async function doApproveMemberRequest(id){
   // open balance.
   var req = (state.memberRequests||[]).find(function(x){ return x.id===id; });
   if(req && req.request_type === 'leave'){
-    var trip = (state.trips||[]).find(function(t){ return t.trip_id === req.trip_id; });
     var inv = { total:0 };
     try{
-      // Need the target's directory id. The member_requests list doesn't
-      // include it; we can look it up via trip members if we're inside
-      // that trip. Otherwise just rely on the backend's final word.
       if(state.trip && state.trip.trip_id === req.trip_id){
         var m = (state.trip.members||[]).find(function(x){
           return displayName(x) === req.target_name;
@@ -2548,19 +2604,26 @@ async function doApproveMemberRequest(id){
       }
     }catch(e){ /* ignore */ }
     if(inv.total > 0){
-      if(!confirm('Heads up: '+req.target_name+' appears in '+inv.total+
+      var ok = await alertModal('Heads up: '+req.target_name+' appears in '+inv.total+
         ' expense'+(inv.total===1?'':'s')+' on this trip. Approving the leave '+
         'will remove them from the trip but the history stays intact. '+
-        'You might prefer to settle first. Approve anyway?')) return;
+        'You might prefer to settle first.', { confirm:true, confirmLabel:'Approve anyway', danger:true });
+      if(!ok) return;
     }
   }
   try{
     var res = await sb.rpc('approve_member_request',{ p_req:id });
     if(res.error) throw res.error;
     toast('Approved');
-    if(state.trip) await reloadTrip();
+    closeModal('modal-notif');
+    // If I'm currently viewing the trip this request relates to, refresh
+    // the whole trip — my membership/admin status may have changed.
+    if(req && state.trip && state.trip.trip_id === req.trip_id){
+      state.expensesLoadedFor = null;
+      state.settlementLoadedFor = null;
+      await reloadTrip();
+    }
     await refreshNotifs();
-    renderNotifs();
   }catch(err){
     toast(err.message || 'Could not approve', true);
   }
@@ -2576,7 +2639,7 @@ function doRejectMemberRequest(id){
 }
 
 async function doCancelMemberRequest(id){
-  if(!confirm('Cancel this request?')) return;
+  if(!await alertModal('Cancel this request?', { confirm:true, confirmLabel:'Cancel request' })) return;
   try{
     var res = await sb.rpc('cancel_member_request',{ p_req:id });
     if(res.error) throw res.error;
@@ -2693,7 +2756,7 @@ async function submitReject(){
 }
 
 async function doCancelRequest(id){
-  if(!confirm('Cancel this request?')) return;
+  if(!await alertModal('Cancel this request?', { confirm:true, confirmLabel:'Cancel request' })) return;
   try{
     var res = await sb.rpc('cancel_expense_request',{ p_req:id });
     if(res.error) throw res.error;
