@@ -801,7 +801,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-3.2';
+var APP_VERSION = 'V2-3.3';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1466,8 +1466,10 @@ function renderPeopleTab(){
       '</div>';
     var actions = '';
     // Make admin — visible to trip admins, for non-admin members only,
-    // unsettled trips only, when there's room for another admin.
-    if(t.is_admin && !t.settled && !m.is_me && !m.is_admin && canPromoteMore){
+    // unsettled trips only, when there's room for another admin, and
+    // only when the target has an account (otherwise the nomination
+    // notification has nowhere to land).
+    if(t.is_admin && !t.settled && !m.is_me && !m.is_admin && m.has_account && canPromoteMore){
       actions +=
         '<button class="icon-btn-sm" data-make-admin="'+m.directory_id+'" title="Nominate as admin">'+
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'+
