@@ -160,9 +160,10 @@
   .exp-chevron.open{transform:rotate(180deg);}
   .exp-split-panel{padding:0 14px 14px;border-top:0.5px solid var(--c-border);}
   .exp-split-head{font-size:11px;font-weight:600;color:var(--c-text-3);
-    text-transform:uppercase;letter-spacing:.3px;padding:10px 0 4px;}
-  .exp-split-per-person{font-size:13px;font-weight:600;color:var(--c-tint);
-    padding:2px 0 8px;}
+    text-transform:uppercase;letter-spacing:.3px;}
+  .exp-split-per-person{font-size:13px;font-weight:600;color:var(--c-tint);}
+  .exp-split-head-row{display:flex;justify-content:space-between;align-items:baseline;
+    padding:10px 0 6px;gap:10px;}
   .exp-split-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;
     padding:2px 0;}
   .exp-split-cell{font-size:14px;padding:4px 0;overflow:hidden;
@@ -170,11 +171,11 @@
 
   /* ---- EXPENSE MODAL — split list ---- */
   .ex-split-mode{display:flex;gap:8px;margin-top:4px;}
-  .ex-radio{flex:1 1 0;display:flex;align-items:center;justify-content:center;
+  .ex-radio{flex:1 1 0;width:0;display:flex;align-items:center;justify-content:center;
     gap:8px;padding:11px 12px;border:1px solid var(--c-border);
     border-radius:var(--r-sm);background:var(--c-bg);
     font-size:14px;font-weight:500;cursor:pointer;min-height:46px;
-    box-sizing:border-box;}
+    box-sizing:border-box;text-align:center;}
   .ex-radio input{margin:0;width:16px;height:16px;flex-shrink:0;accent-color:var(--c-tint);}
   .ex-radio:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);color:var(--c-tint);}
   #ex-split-list{margin-top:10px;border:1px solid var(--c-border);
@@ -251,6 +252,20 @@
   .dir-meta{font-size:12px;color:var(--c-text-2);margin-top:2px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .dir-trips-badge{font-size:11px;color:var(--c-text-3);flex-shrink:0;}
+
+  /* ---- TRIP SWITCH ROWS ---- */
+  .ts-row{display:flex;align-items:center;gap:10px;padding:12px 14px;
+    background:var(--c-card);border-radius:var(--r);margin-bottom:8px;
+    box-shadow:var(--shadow);width:100%;text-align:left;cursor:pointer;
+    border:1px solid transparent;color:inherit;font-family:inherit;}
+  .ts-row.current{border-color:var(--c-tint);background:var(--c-tint-bg);}
+  .ts-row:active{background:var(--c-bg);}
+  .ts-name{flex:1;font-size:15px;font-weight:600;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ts-check{color:var(--c-tint);flex-shrink:0;}
+  .ts-check svg{width:18px;height:18px;}
+
+  .td-name-btn:active{background:var(--c-bg);}
 
   /* ---- EDIT PERSON: trips list ---- */
   .ep-trip-row{display:flex;align-items:center;justify-content:space-between;
@@ -427,7 +442,10 @@
     <button class="icon-btn" id="td-back" title="Trips">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
     </button>
-    <span class="header-title" id="td-name" style="flex:1;text-align:center;font-size:16px;"></span>
+    <button class="header-title td-name-btn" id="td-name" style="flex:1;font-size:16px;background:none;border:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:inherit;cursor:pointer;font-weight:700;padding:6px 8px;border-radius:8px;font-family:inherit;">
+      <span id="td-name-text"></span>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
     <div class="header-right">
       <button class="icon-btn" id="btn-directory-2" title="Directory" hidden>
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -542,6 +560,19 @@
   </div>
 </div>
 
+<!-- ======================= TRIP SWITCHER ======================= -->
+<div class="modal" id="modal-trip-switch" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Switch trip</div>
+    <div class="modal-body" id="ts-body" style="min-height:120px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ts-close" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= EXPENSE MODAL (add / edit) ======================= -->
 <div class="modal" id="modal-expense" hidden>
   <div class="modal-backdrop"></div>
@@ -564,7 +595,9 @@
       <div class="msg" id="ex-msg"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-secondary" id="ex-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;font-size:20px;">×</button>
+      <button class="btn btn-secondary" id="ex-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;display:flex;align-items:center;justify-content:center;" title="Delete">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+      </button>
       <button class="btn btn-secondary" id="ex-cancel">Cancel</button>
       <button class="btn btn-primary" id="ex-save">Save</button>
     </div>
@@ -620,7 +653,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.6';
+var APP_VERSION = 'V2-2.7';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -894,7 +927,7 @@ function openTrip(tripId){
 async function openTripInternal(tripId, tab){
   hide('view-trips');
   show('view-trip');
-  $('td-name').textContent = '';
+  $('td-name-text').textContent = '';
   state.activeTab = tab || 'settlement';
   state.expandedExpense = null;
   state.expensesLoadedFor = null;
@@ -907,13 +940,54 @@ async function openTripInternal(tripId, tab){
     var res=await sb.rpc('get_trip',{ p_trip:tripId });
     if(res.error) throw res.error;
     state.trip = res.data;
-    $('td-name').textContent = state.trip.name;
+    $('td-name-text').textContent = state.trip.name;
     renderActiveTab();
   }catch(err){
     $('tab-settlement').innerHTML =
       '<div class="empty"><div class="empty-title">Could not load trip</div>'+
       '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
   }
+}
+
+async function openTripSwitcher(){
+  openModal('modal-trip-switch');
+  $('ts-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  // Use the cached trips list if we have it; otherwise fetch.
+  if(!state.trips || state.trips.length === 0){
+    try{
+      var res = await sb.rpc('list_my_trips');
+      if(res.error) throw res.error;
+      state.trips = res.data || [];
+    }catch(err){
+      $('ts-body').innerHTML =
+        '<div class="empty"><div class="empty-sub">Could not load trips.</div></div>';
+      return;
+    }
+  }
+  if(!state.trips || state.trips.length === 0){
+    $('ts-body').innerHTML =
+      '<div class="empty"><div class="empty-sub">You don\'t have any other trips.</div></div>';
+    return;
+  }
+  var currentId = state.trip ? state.trip.trip_id : null;
+  var h = '';
+  state.trips.forEach(function(t){
+    var isCurrent = (t.trip_id === currentId);
+    h += '<button class="ts-row'+(isCurrent?' current':'')+'" data-ts="'+t.trip_id+'">'+
+      '<span class="ts-name">'+esc(t.name)+'</span>'+
+      (isCurrent ? '<span class="ts-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>' : '')+
+      '</button>';
+  });
+  $('ts-body').innerHTML = h;
+  $('ts-body').onclick = function(ev){
+    var row = ev.target.closest('[data-ts]');
+    if(!row) return;
+    var id = row.dataset.ts;
+    closeModal('modal-trip-switch');
+    if(id !== currentId){
+      openTrip(id);
+    }
+  };
 }
 
 function setActiveTab(name){
@@ -1090,8 +1164,8 @@ function renderExpensesTab(){
       '<button class="exp-row" data-toggle="'+e.expense_id+'">'+
         '<div class="exp-left">'+
           '<div class="exp-desc">'+esc(e.description)+'</div>'+
-          '<div class="exp-meta">Paid by '+esc(e.paid_by_name||'?')+' · split '+
-            splitIds.length+' '+(splitIds.length===1?'way':'ways')+'</div>'+
+          '<div class="exp-meta">Paid by '+esc(e.paid_by_name||'?')+' · '+
+            splitIds.length+' '+(splitIds.length===1?'share':'shares')+'</div>'+
         '</div>'+
         '<span class="exp-amount">'+money(Number(e.amount))+'</span>'+
         '<span class="exp-chevron'+(open?' open':'')+'">'+
@@ -1100,8 +1174,10 @@ function renderExpensesTab(){
       '</button>';
     if(open){
       h += '<div class="exp-split-panel">'+
-        '<div class="exp-split-head">Split between '+splitIds.length+'</div>'+
-        '<div class="exp-split-per-person">'+money(perPerson)+' per person</div>'+
+        '<div class="exp-split-head-row">'+
+          '<span class="exp-split-head">Split between '+splitIds.length+'</span>'+
+          '<span class="exp-split-per-person">'+money(perPerson)+' per person</span>'+
+        '</div>'+
         '<div class="exp-split-grid">';
       splitIds.forEach(function(sid){
         h += '<div class="exp-split-cell">'+esc(nameById[sid]||'Unknown')+'</div>';
@@ -1700,11 +1776,15 @@ state.editingPerson = null;
 
 async function openEditPerson(dirId){
   state.editingPerson = null;
+  state.editPersonOriginal = null;
   $('ep-first').value=''; $('ep-last').value=''; $('ep-email').value='';
   $('ep-msg').className='msg';
   hide('ep-email-note');
   hide('ep-trips-section');
   $('ep-trips-list').innerHTML='';
+  // Start disabled while we load
+  $('ep-save').textContent = 'Save';
+  $('ep-save').disabled = true;
   openModal('modal-edit-person');
   try{
     var res = await sb.rpc('get_directory_person',{ p_dir:dirId });
@@ -1723,6 +1803,9 @@ async function openEditPerson(dirId){
       $('ep-email').disabled = false;
       hide('ep-email-note');
     }
+    // Snapshot original values so we can detect changes.
+    state.editPersonOriginal = JSON.stringify(readEditPersonForm());
+    $('ep-save').disabled = true;   // nothing changed yet
     // Trips
     if(p.trips && p.trips.length){
       var th = '';
@@ -1746,6 +1829,20 @@ async function openEditPerson(dirId){
     closeModal('modal-edit-person');
     toast(err.message||'Could not load person', true);
   }
+}
+
+function readEditPersonForm(){
+  return {
+    first: $('ep-first').value.trim(),
+    last:  $('ep-last').value.trim(),
+    email: $('ep-email').value.trim()
+  };
+}
+
+function checkEditPersonChanged(){
+  if(!state.editPersonOriginal) return;
+  var now = JSON.stringify(readEditPersonForm());
+  $('ep-save').disabled = (now === state.editPersonOriginal);
 }
 
 async function saveEditPerson(){
@@ -2133,11 +2230,18 @@ $('nt-name').addEventListener('keydown',function(e){
 });
 $('acc-close').onclick=function(){ closeModal('modal-account'); };
 $('acc-signout').onclick=doSignOut;
+// Trip-switcher (header trip name dropdown)
+$('td-name').onclick = openTripSwitcher;
+$('ts-close').onclick = function(){ closeModal('modal-trip-switch'); };
 // Edit-person modal wiring
 $('ep-cancel').onclick=function(){ closeModal('modal-edit-person'); };
 $('ep-save').onclick=saveEditPerson;
 $('ep-delete').onclick=deleteEditPerson;
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif'].forEach(function(id){
+// Track changes so Save stays disabled until the user actually changes something.
+['ep-first','ep-last','ep-email'].forEach(function(id){
+  $(id).addEventListener('input', checkEditPersonChanged);
+});
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
