@@ -353,7 +353,7 @@
   <div class="header">
     <span class="header-title">Trips</span>
     <div class="header-right">
-      <button class="icon-btn" id="btn-directory" title="Directory">
+      <button class="icon-btn" id="btn-directory" title="Directory" hidden>
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       </button>
       <button class="icon-btn" id="btn-account" title="Account">
@@ -560,7 +560,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.1';
+var APP_VERSION = 'V2-2.2';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1656,6 +1656,8 @@ async function enterApp(){
   $('avatar').textContent=initial;
   $('avatar-2').textContent=initial;
   $('avatar-3').textContent=initial;
+  // Directory header icon is for the global admin only.
+  $('btn-directory').hidden = !state.profile.is_global_admin;
   hide('view-auth');
   hide('view-trip');
   hide('view-directory');
