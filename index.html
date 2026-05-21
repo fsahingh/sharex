@@ -614,7 +614,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.4';
+var APP_VERSION = 'V2-2.5';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -876,14 +876,24 @@ function renderTrips(){
 state.trip = null;
 state.activeTab = 'settlement';
 
-async function openTrip(tripId){
+function openTrip(tripId){
+  // Public entry point — updates the URL hash, which triggers applyRoute
+  // via the hashchange listener.
+  setRoute('trip/'+tripId);
+  // hashchange fires asynchronously; also kick the render directly so the
+  // UI doesn't feel laggy.
+  applyRoute();
+}
+
+async function openTripInternal(tripId, tab){
   hide('view-trips');
   show('view-trip');
   $('td-name').textContent = '';
-  state.activeTab='settlement';
+  state.activeTab = tab || 'settlement';
   state.expandedExpense = null;
-  state.expensesLoadedFor = null;       // force expenses reload on first visit
-  setActiveTab('settlement');
+  state.expensesLoadedFor = null;
+  state.settlementLoadedFor = null;
+  setActiveTab(state.activeTab);
   $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   $('tab-expenses').innerHTML='';
   $('tab-people').innerHTML='';
@@ -1596,9 +1606,12 @@ async function doSignOut(){
 // ============================================================
 state.directory = [];
 
-async function openDirectory(){
-  // Both Account modal and Directory live on top of "view-trips"-ish chrome;
-  // closing the account modal first keeps the UI clean if invoked from there.
+function openDirectory(){
+  setRoute('directory');
+  applyRoute();
+}
+
+async function openDirectoryInternal(){
   closeModal('modal-account');
   hide('view-trips');
   hide('view-trip');
@@ -1658,8 +1671,8 @@ function renderDirectory(){
 }
 
 function closeDirectory(){
-  hide('view-directory');
-  show('view-trips');
+  setRoute('trips');
+  applyRoute();
 }
 
 // ----- Edit Person -----
@@ -1959,6 +1972,73 @@ async function doCancelRequest(id){
 // ============================================================
 //  ROUTING
 // ============================================================
+// The current screen is encoded in window.location.hash so a refresh
+// (or pull-to-refresh) lands the user back where they were.
+//   ''          -> trips list
+//   #trips      -> trips list
+//   #directory  -> directory
+//   #trip/<id>[/<tab>]  -> a specific trip's detail (default tab: settlement)
+//
+// All navigation goes through setRoute(); the hashchange listener calls
+// applyRoute() to render. _routeApplying guards against the inner navigation
+// re-entering applyRoute when it sets the hash itself.
+var _routeApplying = false;
+
+function setRoute(path){
+  var newHash = '#'+path;
+  if(window.location.hash === newHash) return;
+  // Use replaceState so the listener doesn't fire — the caller will invoke
+  // applyRoute itself if it wants the UI to update.
+  history.replaceState(null, '', window.location.pathname +
+    window.location.search + newHash);
+}
+
+function parseRoute(){
+  var raw = (window.location.hash||'').replace(/^#/, '');
+  // After a magic-link click, Supabase puts auth tokens in the hash like
+  // "access_token=...&refresh_token=...". Treat that as no route.
+  if(raw.indexOf('access_token=') >= 0 || raw.indexOf('error=') >= 0){
+    return { view:'trips' };
+  }
+  if(!raw || raw==='trips')        return { view:'trips' };
+  if(raw==='directory')            return { view:'directory' };
+  if(raw.indexOf('trip/')===0){
+    var parts = raw.split('/');
+    return { view:'trip', tripId: parts[1] || null,
+             tab: parts[2] || 'settlement' };
+  }
+  return { view:'trips' };
+}
+
+async function applyRoute(){
+  var r = parseRoute();
+  // Directory: global-admin-only. Anything else falls back to trips.
+  if(r.view === 'directory'){
+    if(!(state.profile && state.profile.is_global_admin)){
+      setRoute('trips'); return;
+    }
+    hide('view-auth'); hide('view-trip'); show('view-directory'); hide('view-trips');
+    await openDirectoryInternal();
+    return;
+  }
+  if(r.view === 'trip' && r.tripId){
+    hide('view-auth'); hide('view-trips'); hide('view-directory');
+    show('view-trip');
+    await openTripInternal(r.tripId, r.tab || 'settlement');
+    return;
+  }
+  // Default: trips
+  hide('view-auth'); hide('view-trip'); hide('view-directory');
+  show('view-trips');
+  loadTrips();
+}
+
+window.addEventListener('hashchange', function(){
+  if(_routeApplying) return;
+  if(!state.session) return;     // not signed in
+  applyRoute();
+});
+
 async function enterApp(){
   try{
     var res=await sb.from('profiles').select('*')
@@ -1981,16 +2061,24 @@ async function enterApp(){
   // Directory header icon is for the global admin only.
   $('btn-directory').hidden = !state.profile.is_global_admin;
   hide('view-auth');
-  hide('view-trip');
-  hide('view-directory');
-  show('view-trips');
-  loadTrips();
   refreshNotifs();
+  // Restore whichever screen the user last viewed (URL hash). Falls back
+  // to the trips list when there's nothing to restore.
+  applyRoute();
 }
 
 // Show the auth screen starting at the email step.
 function showAuth(){
+  // Clear the route so refreshing the sign-in page doesn't try to restore
+  // a screen the (now signed-out) user can't see.
+  if(window.location.hash){
+    _routeApplying = true;
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    _routeApplying = false;
+  }
   hide('view-trips');
+  hide('view-trip');
+  hide('view-directory');
   show('view-auth');
   authFlow={ email:'' };
   renderAuthEmail();
@@ -2049,15 +2137,17 @@ document.querySelectorAll('input[name="ex-split"]').forEach(function(r){
 
 // Trip detail wiring
 $('td-back').onclick = function(){
-  hide('view-trip');
-  show('view-trips');
-  state.trip=null;
-  loadTrips();   // refresh trip list (counts may have changed)
+  state.trip = null;
+  setRoute('trips');
+  applyRoute();
 };
 document.querySelectorAll('#view-trip .tab').forEach(function(t){
   t.onclick = function(){
     setActiveTab(t.dataset.tab);
     renderActiveTab();
+    if(state.trip){
+      setRoute('trip/'+state.trip.trip_id+'/'+t.dataset.tab);
+    }
   };
 });
 
