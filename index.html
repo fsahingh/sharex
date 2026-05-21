@@ -401,11 +401,14 @@
 <!-- ======================= DIRECTORY ======================= -->
 <div id="view-directory" hidden>
   <div class="header">
-    <button class="icon-btn" id="dir-back" title="Back">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    <button class="icon-btn" id="dir-back" title="Trips">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
     </button>
     <span class="header-title" style="flex:1;text-align:center;font-size:16px;">Directory</span>
     <div class="header-right">
+      <button class="icon-btn" id="btn-directory-3" title="Directory" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </button>
       <button class="icon-btn bell-btn" id="btn-bell-3" title="Notifications">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span class="bell-badge" id="bell-badge-3" hidden>0</span>
@@ -421,11 +424,14 @@
 <!-- ======================= TRIP DETAIL ======================= -->
 <div id="view-trip" hidden>
   <div class="header">
-    <button class="icon-btn" id="td-back" title="Back">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    <button class="icon-btn" id="td-back" title="Trips">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
     </button>
     <span class="header-title" id="td-name" style="flex:1;text-align:center;font-size:16px;"></span>
     <div class="header-right">
+      <button class="icon-btn" id="btn-directory-2" title="Directory" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </button>
       <button class="icon-btn bell-btn" id="btn-bell-2" title="Notifications">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span class="bell-badge" id="bell-badge-2" hidden>0</span>
@@ -614,7 +620,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.5';
+var APP_VERSION = 'V2-2.6';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -967,6 +973,7 @@ function renderPeopleTab(){
   var t=state.trip;
   var el=$('tab-people');
   var n=(t.members||[]).length;
+  var canEditDirectory = !!(state.profile && state.profile.is_global_admin);
   var h='<div class="tab-count">'+n+' '+(n===1?'person':'people')+'</div>';
   (t.members||[]).forEach(function(m){
     h += '<div class="person-row">'+
@@ -980,18 +987,31 @@ function renderPeopleTab(){
         '</div>'+
         (m.email ? '<div class="person-email">'+esc(m.email)+'</div>' : '')+
       '</div>';
+    var actions = '';
+    if(canEditDirectory){
+      // Pencil — opens the directory-level edit modal (name/email).
+      actions +=
+        '<button class="icon-btn-sm" data-edit-dir="'+m.directory_id+'" title="Edit person">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'+
+        '</button>';
+    }
     if(t.is_admin && !t.settled && !m.is_me){
-      h += '<div class="person-actions">'+
-        '<button class="icon-btn-sm danger" data-remove="'+m.directory_id+'" title="Remove">'+
+      actions +=
+        '<button class="icon-btn-sm danger" data-remove="'+m.directory_id+'" title="Remove from trip">'+
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>'+
-        '</button></div>';
+        '</button>';
+    }
+    if(actions){
+      h += '<div class="person-actions">'+actions+'</div>';
     }
     h += '</div>';
   });
   el.innerHTML = h;
   el.onclick = function(ev){
+    var ed = ev.target.closest('[data-edit-dir]');
+    if(ed){ openEditPerson(ed.dataset.editDir); return; }
     var rm = ev.target.closest('[data-remove]');
-    if(rm) removePerson(rm.dataset.remove);
+    if(rm){ removePerson(rm.dataset.remove); return; }
   };
 }
 
@@ -1751,7 +1771,9 @@ async function saveEditPerson(){
     if(res.error) throw res.error;
     closeModal('modal-edit-person');
     toast('Saved');
-    await openDirectory();   // reload list
+    // Refresh whichever view we're in (directory list, or the trip's People tab).
+    if(!$('view-directory').hidden){ await openDirectoryInternal(); }
+    if(!$('view-trip').hidden && state.trip){ await reloadTrip(); }
   }catch(err){
     setMsg(err.message || 'Could not save.');
   }
@@ -1769,7 +1791,8 @@ async function deleteEditPerson(){
     if(res.error) throw res.error;
     closeModal('modal-edit-person');
     toast('Deleted');
-    await openDirectory();
+    if(!$('view-directory').hidden){ await openDirectoryInternal(); }
+    if(!$('view-trip').hidden && state.trip){ await reloadTrip(); }
   }catch(err){
     toast(err.message||'Could not delete', true);
   }
@@ -2059,7 +2082,10 @@ async function enterApp(){
   $('avatar-2').textContent=initial;
   $('avatar-3').textContent=initial;
   // Directory header icon is for the global admin only.
-  $('btn-directory').hidden = !state.profile.is_global_admin;
+  var showDir = !!state.profile.is_global_admin;
+  $('btn-directory').hidden = !showDir;
+  $('btn-directory-2').hidden = !showDir;
+  $('btn-directory-3').hidden = !showDir;
   hide('view-auth');
   refreshNotifs();
   // Restore whichever screen the user last viewed (URL hash). Falls back
@@ -2093,6 +2119,8 @@ $('btn-account').onclick=openAccount;
 $('btn-account-2').onclick=openAccount;
 $('btn-account-3').onclick=openAccount;
 $('btn-directory').onclick=openDirectory;
+$('btn-directory-2').onclick=openDirectory;
+$('btn-directory-3').onclick=openDirectory;
 $('dir-back').onclick=closeDirectory;
 $('btn-bell').onclick=openNotifs;
 $('btn-bell-2').onclick=openNotifs;
