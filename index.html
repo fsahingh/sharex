@@ -295,6 +295,13 @@
     font-family:inherit;cursor:pointer;}
   .ts-action.danger{color:var(--c-danger);background:rgba(255,59,48,0.08);}
   .ts-action:active{transform:scale(0.97);}
+  .ts-singleton{display:flex;align-items:center;justify-content:center;gap:8px;
+    width:100%;padding:11px 12px;margin-bottom:8px;background:var(--c-bg);
+    border:1px solid var(--c-border);border-radius:var(--r-sm);
+    font-size:13px;font-weight:600;color:var(--c-text);
+    font-family:inherit;cursor:pointer;}
+  .ts-singleton.danger{color:var(--c-danger);background:rgba(255,59,48,0.08);}
+  .ts-singleton:active{transform:scale(0.99);}
   .ts-section{font-size:11px;font-weight:600;color:var(--c-text-3);
     text-transform:uppercase;letter-spacing:.3px;padding:4px 4px 8px;}
 
@@ -362,6 +369,7 @@
   .notif-actions .btn-cancel{background:var(--c-bg);color:var(--c-text);
     border:1px solid var(--c-border);}
   .notif-card.rejected{border-left:4px solid var(--c-danger);}
+  .notif-card.approved{border-left:4px solid var(--c-success);}
   .notif-reason{margin-top:10px;padding:10px 12px;border-radius:10px;
     background:rgba(255,59,48,0.10);color:var(--c-text);font-size:13px;
     line-height:1.4;}
@@ -772,7 +780,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-3.0';
+var APP_VERSION = 'V2-3.1';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1092,10 +1100,9 @@ async function openTripSwitcher(){
   }
   var currentId = state.trip ? state.trip.trip_id : null;
   var isAdminHere = !!(state.trip && state.trip.is_admin);
+  var isMemberHere = !!(state.trip);
   var h = '';
-  // Admin actions for the current trip — only if there is a current trip
-  // and the caller is its admin (or the global admin, which is_trip_admin
-  // captures already through state.trip.is_admin).
+  // Admin actions for the current trip.
   if(state.trip && isAdminHere){
     h += '<div class="ts-actions">'+
       '<button class="ts-action" data-ts-rename="1">'+
@@ -1107,6 +1114,19 @@ async function openTripSwitcher(){
         '<span>Delete trip</span>'+
       '</button>'+
       '</div>';
+    // Resign admin — only if there's another non-global trip-admin (the
+    // RPC enforces this too; we just hide the button to be polite).
+    h += '<button class="ts-singleton" data-ts-resign="1">'+
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>'+
+      '<span>Resign as admin</span>'+
+      '</button>';
+  }
+  // Leave trip — anyone who is a member but NOT an admin.
+  if(state.trip && isMemberHere && !isAdminHere){
+    h += '<button class="ts-singleton danger" data-ts-leave="1">'+
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>'+
+      '<span>Leave trip</span>'+
+      '</button>';
   }
   if(state.trips.length === 0){
     h += '<div class="empty"><div class="empty-sub">You don\'t have any other trips.</div></div>';
@@ -1130,6 +1150,16 @@ async function openTripSwitcher(){
     if(ev.target.closest('[data-ts-delete]')){
       closeModal('modal-trip-switch');
       confirmDeleteTrip();
+      return;
+    }
+    if(ev.target.closest('[data-ts-leave]')){
+      closeModal('modal-trip-switch');
+      submitLeaveTrip();
+      return;
+    }
+    if(ev.target.closest('[data-ts-resign]')){
+      closeModal('modal-trip-switch');
+      confirmResignAdmin();
       return;
     }
     var row = ev.target.closest('[data-ts]');
@@ -1185,6 +1215,35 @@ async function confirmDeleteTrip(){
     applyRoute();
   }catch(err){
     toast(err.message || 'Could not delete', true);
+  }
+}
+
+// ----- Leave trip (non-admin) -----
+async function submitLeaveTrip(){
+  if(!state.trip) return;
+  var nm = state.trip.name;
+  if(!confirm('Send a request to leave "'+nm+'"?\n\nThe trip admin must approve. If they don\'t respond within 3 days, you\'ll be removed automatically.')) return;
+  try{
+    var res = await sb.rpc('submit_leave_request',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    toast('Leave request sent');
+    await refreshNotifs();
+  }catch(err){
+    toast(err.message || 'Could not send request', true);
+  }
+}
+
+// ----- Resign admin -----
+async function confirmResignAdmin(){
+  if(!state.trip) return;
+  if(!confirm('Step down as admin of "'+state.trip.name+'"? You\'ll stay in the trip as a regular member. This is allowed only if another non-global admin exists.')) return;
+  try{
+    var res = await sb.rpc('resign_as_admin',{ p_trip:state.trip.trip_id });
+    if(res.error) throw res.error;
+    toast('You are no longer an admin');
+    await reloadTrip();
+  }catch(err){
+    toast(err.message || 'Could not resign', true);
   }
 }
 
@@ -1326,6 +1385,12 @@ function renderPeopleTab(){
   var el=$('tab-people');
   var n=(t.members||[]).length;
   var canEditDirectory = !!(state.profile && state.profile.is_global_admin);
+  // Count non-global admins on this trip — used to decide whether the
+  // "Make admin" star is shown (cap of 2, global admin doesn't count).
+  var nonGlobalAdminCount = (t.members||[]).filter(function(m){
+    return m.is_admin && !m.is_global_admin;
+  }).length;
+  var canPromoteMore = (nonGlobalAdminCount < 2);
   var h='<div class="tab-count">'+n+' '+(n===1?'person':'people')+'</div>';
   (t.members||[]).forEach(function(m){
     h += '<div class="person-row">'+
@@ -1340,8 +1405,15 @@ function renderPeopleTab(){
         (m.email ? '<div class="person-email">'+esc(m.email)+'</div>' : '')+
       '</div>';
     var actions = '';
+    // Make admin — visible to trip admins, for non-admin members only,
+    // unsettled trips only, when there's room for another admin.
+    if(t.is_admin && !t.settled && !m.is_me && !m.is_admin && canPromoteMore){
+      actions +=
+        '<button class="icon-btn-sm" data-make-admin="'+m.directory_id+'" title="Nominate as admin">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'+
+        '</button>';
+    }
     if(canEditDirectory){
-      // Pencil — opens the directory-level edit modal (name/email).
       actions +=
         '<button class="icon-btn-sm" data-edit-dir="'+m.directory_id+'" title="Edit person">'+
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'+
@@ -1360,11 +1432,31 @@ function renderPeopleTab(){
   });
   el.innerHTML = h;
   el.onclick = function(ev){
+    var ma = ev.target.closest('[data-make-admin]');
+    if(ma){ submitMakeAdmin(ma.dataset.makeAdmin); return; }
     var ed = ev.target.closest('[data-edit-dir]');
     if(ed){ openEditPerson(ed.dataset.editDir); return; }
     var rm = ev.target.closest('[data-remove]');
     if(rm){ removePerson(rm.dataset.remove); return; }
   };
+}
+
+async function submitMakeAdmin(directoryId){
+  var member=(state.trip.members||[]).find(function(m){ return m.directory_id===directoryId; });
+  if(!member) return;
+  var nm = displayName(member);
+  if(!confirm('Send a notification to '+nm+' to become an admin?\n\nThey can accept or decline.')) return;
+  try{
+    var res = await sb.rpc('submit_make_admin_request',{
+      p_trip: state.trip.trip_id,
+      p_target_directory_id: directoryId
+    });
+    if(res.error) throw res.error;
+    toast('Nomination sent');
+    await refreshNotifs();
+  }catch(err){
+    toast(err.message || 'Could not send', true);
+  }
 }
 
 async function removePerson(directoryId){
@@ -2217,6 +2309,7 @@ async function deleteEditPerson(){
 // ============================================================
 state.notifs = [];
 state.accessRequests = [];
+state.memberRequests = [];
 
 // Refresh the bell badge from the server. Called on enter + after actions.
 async function refreshNotifs(){
@@ -2227,6 +2320,12 @@ async function refreshNotifs(){
   }catch(err){
     state.notifs = [];
   }
+  // Member requests (leave / make_admin) — anyone can have these.
+  try{
+    var mr = await sb.rpc('list_my_member_requests');
+    if(!mr.error) state.memberRequests = (mr.data && mr.data.items) || [];
+    else state.memberRequests = [];
+  }catch(e){ state.memberRequests = []; }
   // Access requests are only visible to the global admin.
   state.accessRequests = [];
   if(state.profile && state.profile.is_global_admin){
@@ -2235,7 +2334,9 @@ async function refreshNotifs(){
       if(!ar.error) state.accessRequests = ar.data || [];
     }catch(e){ /* ignore */ }
   }
-  var n = state.notifs.length + state.accessRequests.length;
+  // Best-effort lazy expire of stale member requests (3 days). Cheap RPC.
+  try{ sb.rpc('auto_expire_member_requests'); }catch(e){}
+  var n = state.notifs.length + state.accessRequests.length + state.memberRequests.length;
   ['bell-badge','bell-badge-2','bell-badge-3'].forEach(function(id){
     var el = $(id);
     if(!el) return;
@@ -2258,7 +2359,8 @@ function renderNotifs(){
   var el = $('notif-body');
   var list = state.notifs || [];
   var access = state.accessRequests || [];
-  if(list.length === 0 && access.length === 0){
+  var memb = state.memberRequests || [];
+  if(list.length === 0 && access.length === 0 && memb.length === 0){
     el.innerHTML =
       '<div class="empty"><div class="empty-title">No notifications</div>'+
       '<div class="empty-sub">You\'ll see pending requests here.</div></div>';
@@ -2276,6 +2378,55 @@ function renderNotifs(){
         '<button class="btn btn-reject" data-ar-reject="'+a.id+'">Reject</button>'+
         '<button class="btn btn-approve" data-ar-approve="'+a.id+'">Approve</button>'+
       '</div></div>';
+  });
+  // ---- Member requests (leave + make_admin) ----
+  memb.forEach(function(r){
+    var isRejected = (r.status === 'rejected');
+    var isApproved = (r.status === 'approved');
+    var isResolved = isRejected || isApproved;
+    var isLeave = (r.request_type === 'leave');
+    var isMakeAdmin = (r.request_type === 'make_admin');
+    var headTxt;
+    if(isLeave){
+      headTxt = isRejected ? 'Leave request declined'
+              : isApproved ? 'You left the trip'
+              : 'Leave request';
+    }else if(isMakeAdmin){
+      headTxt = isRejected ? 'Admin nomination declined'
+              : isApproved ? 'Admin nomination accepted'
+              : 'Admin nomination';
+    }
+    h += '<div class="notif-card'+(isRejected?' rejected':'')+(isApproved?' approved':'')+'">'+
+      '<div class="notif-head">'+headTxt+'</div>'+
+      '<div class="notif-trip">'+esc(r.trip_name)+'</div>';
+    // Body text — who is asking whom
+    if(isLeave){
+      var who = r.initiated_by_me ? 'You' : esc(r.target_name);
+      h += '<div class="notif-title">'+who+' want'+(r.initiated_by_me?'':'s')+' to leave the trip</div>';
+    }else if(isMakeAdmin){
+      if(r.i_am_target && !isResolved){
+        h += '<div class="notif-title">'+esc(r.initiator_name)+' nominated you as an admin</div>';
+      }else if(r.initiated_by_me && !isResolved){
+        h += '<div class="notif-title">Waiting for '+esc(r.target_name)+' to accept</div>';
+      }else{
+        h += '<div class="notif-title">'+esc(r.target_name)+' as admin</div>';
+      }
+    }
+    if(isRejected && r.rejection_reason){
+      h += '<div class="notif-reason"><strong>Reason:</strong> '+esc(r.rejection_reason)+'</div>';
+    }
+    h += '<div class="notif-actions">';
+    if(isResolved && (r.initiated_by_me || r.i_am_target)){
+      h += '<button class="btn btn-cancel" data-mr-dismiss="'+r.id+'">Dismiss</button>';
+    }else if(r.i_can_decide){
+      h += '<button class="btn btn-reject" data-mr-reject="'+r.id+'">'+
+        (isMakeAdmin?'Decline':'Reject')+'</button>'+
+        '<button class="btn btn-approve" data-mr-approve="'+r.id+'">'+
+        (isMakeAdmin?'Accept':'Approve')+'</button>';
+    }else if(r.initiated_by_me){
+      h += '<button class="btn btn-cancel" data-mr-cancel="'+r.id+'">Cancel</button>';
+    }
+    h += '</div></div>';
   });
   // ---- Change requests ----
   list.forEach(function(r){
@@ -2351,6 +2502,16 @@ function renderNotifs(){
     if(aa){ doApproveAccess(aa.dataset.arApprove); return; }
     var ar = ev.target.closest('[data-ar-reject]');
     if(ar){ doRejectAccess(ar.dataset.arReject); return; }
+    // Member-requests (leave / make-admin)
+    var ma = ev.target.closest('[data-mr-approve]');
+    if(ma){ doApproveMemberRequest(ma.dataset.mrApprove); return; }
+    var mr = ev.target.closest('[data-mr-reject]');
+    if(mr){ doRejectMemberRequest(mr.dataset.mrReject); return; }
+    var mc = ev.target.closest('[data-mr-cancel]');
+    if(mc){ doCancelMemberRequest(mc.dataset.mrCancel); return; }
+    var md = ev.target.closest('[data-mr-dismiss]');
+    if(md){ doDismissMemberRequest(md.dataset.mrDismiss); return; }
+    // Expense change requests
     var a = ev.target.closest('[data-approve]');
     if(a){ doApproveRequest(a.dataset.approve); return; }
     var r = ev.target.closest('[data-reject]');
@@ -2360,6 +2521,82 @@ function renderNotifs(){
     var d = ev.target.closest('[data-dismiss]');
     if(d){ doDismissNotif(d.dataset.dismiss); return; }
   };
+}
+
+// ----- Member request actions -----
+async function doApproveMemberRequest(id){
+  // For 'leave' approvals, surface the same warning we use for direct
+  // member removal so admins don't accidentally drop someone with an
+  // open balance.
+  var req = (state.memberRequests||[]).find(function(x){ return x.id===id; });
+  if(req && req.request_type === 'leave'){
+    var trip = (state.trips||[]).find(function(t){ return t.trip_id === req.trip_id; });
+    var inv = { total:0 };
+    try{
+      // Need the target's directory id. The member_requests list doesn't
+      // include it; we can look it up via trip members if we're inside
+      // that trip. Otherwise just rely on the backend's final word.
+      if(state.trip && state.trip.trip_id === req.trip_id){
+        var m = (state.trip.members||[]).find(function(x){
+          return displayName(x) === req.target_name;
+        });
+        if(m){
+          var ic = await sb.rpc('count_member_involvement',
+            { p_trip: req.trip_id, p_directory_id: m.directory_id });
+          if(!ic.error && ic.data) inv = ic.data;
+        }
+      }
+    }catch(e){ /* ignore */ }
+    if(inv.total > 0){
+      if(!confirm('Heads up: '+req.target_name+' appears in '+inv.total+
+        ' expense'+(inv.total===1?'':'s')+' on this trip. Approving the leave '+
+        'will remove them from the trip but the history stays intact. '+
+        'You might prefer to settle first. Approve anyway?')) return;
+    }
+  }
+  try{
+    var res = await sb.rpc('approve_member_request',{ p_req:id });
+    if(res.error) throw res.error;
+    toast('Approved');
+    if(state.trip) await reloadTrip();
+    await refreshNotifs();
+    renderNotifs();
+  }catch(err){
+    toast(err.message || 'Could not approve', true);
+  }
+}
+
+state.rejectingMemberRequestId = null;
+function doRejectMemberRequest(id){
+  state.rejectingMemberRequestId = id;
+  $('rj-reason').value = '';
+  $('rj-msg').className = 'msg';
+  openModal('modal-reject');
+  setTimeout(function(){ $('rj-reason').focus(); }, 150);
+}
+
+async function doCancelMemberRequest(id){
+  if(!confirm('Cancel this request?')) return;
+  try{
+    var res = await sb.rpc('cancel_member_request',{ p_req:id });
+    if(res.error) throw res.error;
+    toast('Cancelled');
+    await refreshNotifs();
+    renderNotifs();
+  }catch(err){
+    toast(err.message || 'Could not cancel', true);
+  }
+}
+
+async function doDismissMemberRequest(id){
+  try{
+    var res = await sb.rpc('dismiss_my_member_request_notification',{ p_req:id });
+    if(res.error) throw res.error;
+    await refreshNotifs();
+    renderNotifs();
+  }catch(err){
+    toast(err.message || 'Could not dismiss', true);
+  }
 }
 
 async function doDismissNotif(id){
@@ -2424,18 +2661,27 @@ function doRejectRequest(id){
   setTimeout(function(){ $('rj-reason').focus(); }, 150);
 }
 async function submitReject(){
-  if(!state.rejectingRequestId) return;
+  if(!state.rejectingRequestId && !state.rejectingMemberRequestId) return;
   var reason = $('rj-reason').value.trim();
   var btn = $('rj-submit');
   btn.disabled = true; btn.textContent = 'Rejecting…';
   try{
-    var res = await sb.rpc('reject_expense_request',{
-      p_req: state.rejectingRequestId,
-      p_reason: reason || null
-    });
+    var res;
+    if(state.rejectingMemberRequestId){
+      res = await sb.rpc('reject_member_request',{
+        p_req: state.rejectingMemberRequestId,
+        p_reason: reason || null
+      });
+    }else{
+      res = await sb.rpc('reject_expense_request',{
+        p_req: state.rejectingRequestId,
+        p_reason: reason || null
+      });
+    }
     if(res.error) throw res.error;
     closeModal('modal-reject');
     state.rejectingRequestId = null;
+    state.rejectingMemberRequestId = null;
     toast('Rejected');
     await refreshNotifs();
     renderNotifs();
@@ -2634,7 +2880,7 @@ $('rn-name').addEventListener('keydown',function(e){ if(e.key==='Enter') saveRen
 // Recycle bin modal
 $('rb-close').onclick = function(){ closeModal('modal-recycle'); };
 // Reject-request modal wiring
-$('rj-cancel').onclick = function(){ closeModal('modal-reject'); state.rejectingRequestId=null; };
+$('rj-cancel').onclick = function(){ closeModal('modal-reject'); state.rejectingRequestId=null; state.rejectingMemberRequestId=null; };
 $('rj-submit').onclick = submitReject;
 // Edit-person modal wiring
 $('ep-cancel').onclick=function(){ closeModal('modal-edit-person'); };
