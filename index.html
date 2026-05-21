@@ -210,6 +210,22 @@
     flex-shrink:0;margin:0;}
   .ex-split-row-name{flex:1;font-size:14px;}
 
+  /* ---- EXPENSE PICKER (add-person custom mode) ---- */
+  .ep-pick-row{display:flex;align-items:center;gap:12px;padding:11px 12px;
+    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:6px;
+    cursor:pointer;}
+  .ep-pick-row input{width:18px;height:18px;accent-color:var(--c-tint);}
+  .ep-pick-info{flex:1;min-width:0;}
+  .ep-pick-desc{font-size:14px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ep-pick-meta{font-size:11px;color:var(--c-text-2);margin-top:1px;}
+  .ep-pick-amount{font-size:13px;font-weight:600;flex-shrink:0;}
+  .ep-pick-tools{display:flex;gap:8px;margin-bottom:10px;}
+  .ep-pick-tools button{flex:1;padding:7px;font-size:12px;font-weight:600;
+    background:var(--c-bg);border:1px solid var(--c-border);
+    border-radius:8px;color:var(--c-text);cursor:pointer;
+    font-family:inherit;}
+
   /* ---- SETTLEMENT TAB ---- */
   .settle-summary{background:var(--c-card);border-radius:var(--r);
     box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden;}
@@ -583,6 +599,22 @@
       </div>
       <label for="ap-email" style="margin-top:14px;">Email (optional)</label>
       <input type="email" id="ap-email" class="field" placeholder="email@example.com">
+
+      <!-- Include in existing expenses — which existing splits should the
+           new member be added to. Default: future-only. -->
+      <div id="ap-include-section" style="margin-top:18px;">
+        <div class="tab-count" style="padding:0 0 8px;">Include in expenses</div>
+        <div class="ex-split-mode">
+          <label class="ex-radio"><input type="radio" name="ap-include" value="future" checked> Future only</label>
+          <label class="ex-radio"><input type="radio" name="ap-include" value="all"> All existing</label>
+        </div>
+        <button type="button" id="ap-include-custom-btn" class="btn btn-secondary"
+          style="margin-top:8px;width:100%;font-size:13px;padding:9px;min-height:auto;">
+          Choose specific expenses…
+        </button>
+        <div id="ap-custom-summary" hidden
+          style="margin-top:8px;font-size:12px;color:var(--c-tint);text-align:center;font-weight:600;"></div>
+      </div>
       <div class="msg" id="ap-msg"></div>
     </div>
     <div class="modal-actions">
@@ -667,6 +699,20 @@
     <div class="modal-body" id="ts-body" style="min-height:120px;"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="ts-close" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= EXPENSE PICKER (for add-person custom) ======================= -->
+<div class="modal" id="modal-expense-picker" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Choose expenses</div>
+    <div class="modal-body" id="ep-pick-body" style="min-height:120px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ep-pick-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ep-pick-done">Done</button>
     </div>
   </div>
 </div>
@@ -801,7 +847,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-3.3';
+var APP_VERSION = 'V2-3.4';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2051,6 +2097,14 @@ function openAddPerson(){
   $('ap-email').value='';
   $('ap-msg').className='msg';
   hide('ap-results');
+  hide('ap-custom-summary');
+  $('ap-custom-summary').textContent='';
+  state.apCustomIds = null;
+  // Reset radios + remove any hidden "custom" marker from a previous run.
+  document.querySelector('input[name="ap-include"][value="future"]').checked = true;
+  document.querySelector('input[name="ap-include"][value="all"]').checked = false;
+  var oldMarker = document.querySelector('input[name="ap-include"][value="custom"]');
+  if(oldMarker) oldMarker.remove();
   openModal('modal-add-person');
   setTimeout(function(){ $('ap-search').focus(); },150);
 }
@@ -2085,6 +2139,10 @@ async function runDirectorySearch(q){
     hide('ap-results');
   }
 }
+// Tracks which existing expenses the admin chose to retroactively include
+// the new member into. null = no custom selection has been made yet.
+state.apCustomIds = null;
+
 async function saveAddPerson(){
   var dirId = $('ap-results').dataset.pickedDir || null;
   var first = $('ap-first').value.trim();
@@ -2094,6 +2152,12 @@ async function saveAddPerson(){
     setApMsg('err','Pick someone from the directory, or enter a name/email.');
     return;
   }
+  var mode = (document.querySelector('input[name="ap-include"]:checked')||{}).value || 'future';
+  // If "custom" was picked but the user didn't actually choose any
+  // expenses, treat it as future-only — same behavior as not picking.
+  var customIds = (state.apCustomIds && state.apCustomIds.length) ? state.apCustomIds : null;
+  if(mode === 'custom' && !customIds){ mode = 'future'; }
+
   var btn=$('ap-save');
   btn.disabled=true; btn.textContent='Adding…';
   try{
@@ -2105,13 +2169,127 @@ async function saveAddPerson(){
       p_last_name: last||null
     });
     if(res.error) throw res.error;
+    var newDirId = res.data;   // directory id of the just-added member
+    // Retro-include the new member in selected expenses if asked.
+    if(mode === 'all'){
+      try{
+        await sb.rpc('include_member_in_expenses', {
+          p_trip: state.trip.trip_id,
+          p_directory_id: newDirId,
+          p_all: true
+        });
+      }catch(e){ /* non-fatal; we already added the member */ }
+    }else if(mode === 'custom' && customIds && customIds.length){
+      try{
+        await sb.rpc('include_member_in_expenses', {
+          p_trip: state.trip.trip_id,
+          p_directory_id: newDirId,
+          p_expense_ids: customIds
+        });
+      }catch(e){ /* non-fatal */ }
+    }
     closeModal('modal-add-person');
     toast('Added');
+    state.expensesLoadedFor = null;
+    state.settlementLoadedFor = null;
     await reloadTrip();
   }catch(err){
     setApMsg('err', err.message||'Could not add person.');
   }
   btn.disabled=false; btn.textContent='Add';
+}
+
+// ---- Expense picker for "custom" include mode ----
+function openExpensePicker(){
+  $('ep-pick-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  openModal('modal-expense-picker');
+  // Load current expenses for this trip if not cached.
+  Promise.resolve().then(async function(){
+    var rows;
+    if(state.expenses && state.expenses.length &&
+       state.expensesLoadedFor === state.trip.trip_id){
+      rows = state.expenses;
+    }else{
+      try{
+        var res = await sb.rpc('list_trip_expenses', { p_trip: state.trip.trip_id });
+        if(res.error) throw res.error;
+        rows = res.data || [];
+      }catch(err){
+        $('ep-pick-body').innerHTML =
+          '<div class="empty"><div class="empty-sub">Could not load expenses.</div></div>';
+        return;
+      }
+    }
+    if(!rows.length){
+      $('ep-pick-body').innerHTML =
+        '<div class="empty"><div class="empty-title">No expenses yet</div>'+
+        '<div class="empty-sub">There\'s nothing to choose from.</div></div>';
+      return;
+    }
+    var pre = new Set(state.apCustomIds || []);
+    var h = '<div class="ep-pick-tools">'+
+      '<button id="ep-pick-all">Select all</button>'+
+      '<button id="ep-pick-none">Clear</button></div>';
+    rows.forEach(function(e){
+      var checked = pre.has(e.expense_id) ? 'checked' : '';
+      h += '<label class="ep-pick-row">'+
+        '<input type="checkbox" data-pid="'+e.expense_id+'" '+checked+'>'+
+        '<div class="ep-pick-info">'+
+          '<div class="ep-pick-desc">'+esc(e.description)+'</div>'+
+          '<div class="ep-pick-meta">Paid by '+esc(e.paid_by_name||'?')+'</div>'+
+        '</div>'+
+        '<span class="ep-pick-amount">'+money(Number(e.amount)||0)+'</span>'+
+        '</label>';
+    });
+    $('ep-pick-body').innerHTML = h;
+    $('ep-pick-all').onclick = function(){
+      $('ep-pick-body').querySelectorAll('input[data-pid]').forEach(function(cb){ cb.checked = true; });
+    };
+    $('ep-pick-none').onclick = function(){
+      $('ep-pick-body').querySelectorAll('input[data-pid]').forEach(function(cb){ cb.checked = false; });
+    };
+  });
+}
+function applyExpensePicker(){
+  var ids = [];
+  $('ep-pick-body').querySelectorAll('input[data-pid]:checked').forEach(function(cb){
+    ids.push(cb.dataset.pid);
+  });
+  state.apCustomIds = ids;
+  if(ids.length){
+    // Switch the radio to "custom" implicitly and show a small summary.
+    var rd = document.querySelector('input[name="ap-include"][value="custom"]');
+    if(!rd){
+      // We didn't render a custom radio (kept the UI to 2 radios); add a
+      // virtual one by unchecking the others and marking "future" radio
+      // as our "custom is selected" state via the summary line.
+    }
+    var sum = ids.length+' expense'+(ids.length===1?'':'s')+' selected';
+    $('ap-custom-summary').textContent = sum;
+    show('ap-custom-summary');
+    // Also mark the visible radios as off so the user can see custom is
+    // what will apply. We add a hidden third radio choice.
+    document.querySelector('input[name="ap-include"][value="future"]').checked = false;
+    document.querySelector('input[name="ap-include"][value="all"]').checked = false;
+    // Inject a custom-marker radio (hidden, but checked)
+    var marker = document.querySelector('input[name="ap-include"][value="custom"]');
+    if(!marker){
+      marker = document.createElement('input');
+      marker.type = 'radio';
+      marker.name = 'ap-include';
+      marker.value = 'custom';
+      marker.hidden = true;
+      marker.style.display = 'none';
+      document.querySelector('#ap-include-section .ex-split-mode').appendChild(marker);
+    }
+    marker.checked = true;
+  }else{
+    $('ap-custom-summary').textContent = '';
+    hide('ap-custom-summary');
+    // Default back to "future only"
+    document.querySelector('input[name="ap-include"][value="future"]').checked = true;
+  }
+  closeModal('modal-expense-picker');
 }
 
 // ---- New trip ----
@@ -2956,7 +3134,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle'].forEach(function(id){
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
@@ -3001,6 +3179,10 @@ document.querySelectorAll('#view-trip .tab').forEach(function(t){
 // Add-person modal wiring
 $('ap-cancel').onclick = function(){ closeModal('modal-add-person'); };
 $('ap-save').onclick   = saveAddPerson;
+// Custom expense picker (for add-person "include in expenses")
+$('ap-include-custom-btn').onclick = openExpensePicker;
+$('ep-pick-cancel').onclick = function(){ closeModal('modal-expense-picker'); };
+$('ep-pick-done').onclick = applyExpensePicker;
 $('ap-search').addEventListener('input', function(){
   // Typing in search clears any previous directory pick
   $('ap-results').dataset.pickedDir = '';
