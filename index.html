@@ -470,36 +470,10 @@
       <div style="font-size:14px;color:var(--c-text-2);margin-bottom:4px;">Signed in as</div>
       <div style="font-size:15px;font-weight:600;" id="acc-email"></div>
       <div style="font-size:13px;color:var(--c-text-3);margin-top:2px;" id="acc-role"></div>
-      <button class="btn btn-secondary" id="acc-change-pin" style="margin-top:18px;">Change my PIN</button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="acc-close">Close</button>
       <button class="btn btn-primary" id="acc-signout" style="background:var(--c-danger);">Sign Out</button>
-    </div>
-  </div>
-</div>
-
-<!-- ======================= CHANGE PIN MODAL ======================= -->
-<div class="modal" id="modal-change-pin" hidden>
-  <div class="modal-backdrop"></div>
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <div class="modal-title">Change PIN</div>
-    <div class="modal-body">
-      <label for="cp-old">Current PIN</label>
-      <input type="password" id="cp-old" class="field" inputmode="numeric" maxlength="4"
-        placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">
-      <label for="cp-new">New PIN</label>
-      <input type="password" id="cp-new" class="field" inputmode="numeric" maxlength="4"
-        placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">
-      <label for="cp-new2">Confirm new PIN</label>
-      <input type="password" id="cp-new2" class="field" inputmode="numeric" maxlength="4"
-        placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">
-      <div class="msg" id="cp-msg"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" id="cp-cancel">Cancel</button>
-      <button class="btn btn-primary" id="cp-save">Save</button>
     </div>
   </div>
 </div>
@@ -514,7 +488,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-1.8';
+var APP_VERSION = 'V2-2.0';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -569,17 +543,17 @@ function openModal(id){ show(id); document.body.style.overflow='hidden'; }
 function closeModal(id){ hide(id); document.body.style.overflow=''; }
 
 // ============================================================
-//  AUTH — email + persistent PIN, with email-OTP fallback
+// ============================================================
+//  AUTH — email + OTP only
 // ============================================================
 // Flow:
-//   1. Enter email. We check pin_status(email) and whether THIS device
-//      already has a Supabase session for that email.
-//   2a. PIN exists + this device has a session  -> "Enter PIN" screen.
-//   2b. PIN exists but no session on this device -> must do email OTP first
-//       (security: a new device needs email proof, not just the PIN).
-//   2c. No PIN yet -> email OTP -> "Create PIN" screen.
-//   3. "Forgot PIN" -> email OTP -> "Create new PIN".
-var authFlow = { email:'', mode:'' };   // mode: 'pin' | 'otp-setup' | 'otp-reset'
+//   1. User enters email.
+//   2. We send a one-time 6-digit code (Supabase email OTP).
+//   3. User types the code OR clicks the link in the email.
+//   4. Session is established, user lands in the app.
+//
+// Sign-out clears the local session; signing back in repeats steps 1–4.
+var authFlow = { email:'' };
 
 function setAuthMsg(type,text){
   var m=$('auth-msg'); if(!m) return;
@@ -590,11 +564,11 @@ function setAuthMsg(type,text){
 function renderAuthEmail(){
   $('auth-content').innerHTML =
     '<h1>Sign in</h1>'+
-    '<div class="auth-sub">Enter your email to continue.</div>'+
+    '<div class="auth-sub">Enter your email and we\'ll send you a one-time code.</div>'+
     '<label for="email">Email address</label>'+
     '<input type="email" id="email" class="field" placeholder="you@example.com" '+
       'autocomplete="email" value="'+esc(authFlow.email)+'">'+
-    '<button class="btn btn-primary" id="email-btn" style="margin-top:16px;">Continue</button>'+
+    '<button class="btn btn-primary" id="email-btn" style="margin-top:16px;">Send code</button>'+
     '<div class="msg" id="auth-msg"></div>';
   var inp=$('email');
   inp.focus();
@@ -611,57 +585,30 @@ async function submitEmail(email){
   }
   authFlow.email=email.toLowerCase();
   var btn=$('email-btn');
-  btn.disabled=true; btn.textContent='Checking…';
-  try{
-    // Does this email already have a PIN? Is it locked?
-    var st=await sb.rpc('pin_status',{ p_email:authFlow.email });
-    if(st.error) throw st.error;
-    var status=(st.data&&st.data[0])||{ has_pin:false, locked:false };
-    // Does THIS device already have a Supabase session for this email?
-    var sess=await sb.auth.getSession();
-    var haveSession = !!(sess.data&&sess.data.session
-      && sess.data.session.user
-      && sess.data.session.user.email
-      && sess.data.session.user.email.toLowerCase()===authFlow.email);
-
-    if(status.has_pin && haveSession){
-      // Fast path — just ask for the PIN.
-      if(status.locked){ renderAuthLocked(status.locked_until); }
-      else { renderAuthPin(); }
-    }else{
-      // Need email proof: send an OTP code.
-      // (No PIN yet, OR a new device with no session.)
-      await sendOtp(status.has_pin ? 'otp-reset' : 'otp-setup');
-    }
-  }catch(err){
-    btn.disabled=false; btn.textContent='Continue';
-    setAuthMsg('err',err.message||'Something went wrong.');
-  }
-}
-
-// ---- Send an email OTP code ----
-async function sendOtp(mode){
-  authFlow.mode=mode;
+  btn.disabled=true; btn.textContent='Sending…';
   setAuthMsg('info','Sending a code to your email…');
-  var res=await sb.auth.signInWithOtp({
-    email:authFlow.email,
-    options:{ emailRedirectTo: window.location.origin+window.location.pathname }
-  });
-  if(res.error) throw res.error;
-  renderAuthOtp();
+  try{
+    var res=await sb.auth.signInWithOtp({
+      email:authFlow.email,
+      options:{ emailRedirectTo: window.location.origin+window.location.pathname }
+    });
+    if(res.error) throw res.error;
+    renderAuthOtp();
+  }catch(err){
+    btn.disabled=false; btn.textContent='Send code';
+    setAuthMsg('err',err.message||'Could not send code.');
+  }
 }
 
 // ---- Screen: enter OTP code ----
 function renderAuthOtp(){
-  var note = authFlow.mode==='otp-reset'
-    ? 'Enter it below to reset your PIN.'
-    : 'Enter it below to finish signing in.';
   $('auth-content').innerHTML=
     '<h1>Enter code</h1>'+
-    '<div class="auth-sub">We emailed a 6-digit code to<br><strong>'+esc(authFlow.email)+'</strong>. '+note+'</div>'+
-    '<label for="otp">6-digit code</label>'+
+    '<div class="auth-sub">We emailed a sign-in code to<br><strong>'+esc(authFlow.email)+'</strong>.<br>'+
+    'You can also click the link in the email instead.</div>'+
+    '<label for="otp">Sign-in code</label>'+
     '<input type="text" id="otp" class="field" inputmode="numeric" '+
-      'autocomplete="one-time-code" maxlength="6" placeholder="000000" '+
+      'autocomplete="one-time-code" maxlength="8" placeholder="000000" '+
       'style="text-align:center;font-size:22px;letter-spacing:6px;">'+
     '<button class="btn btn-primary" id="otp-btn" style="margin-top:16px;">Verify</button>'+
     '<button class="btn btn-secondary" id="otp-resend" style="margin-top:10px;">Resend code</button>'+
@@ -674,8 +621,14 @@ function renderAuthOtp(){
     if(e.key==='Enter') verifyOtp(inp.value.trim());
   });
   $('otp-resend').onclick=async function(){
-    try{ await sendOtp(authFlow.mode); setAuthMsg('info','A new code is on its way.'); }
-    catch(err){ setAuthMsg('err',err.message||'Could not resend.'); }
+    try{
+      var res=await sb.auth.signInWithOtp({
+        email:authFlow.email,
+        options:{ emailRedirectTo: window.location.origin+window.location.pathname }
+      });
+      if(res.error) throw res.error;
+      setAuthMsg('info','A new code is on its way.');
+    }catch(err){ setAuthMsg('err',err.message||'Could not resend.'); }
   };
   $('otp-back').onclick=renderAuthEmail;
 }
@@ -693,144 +646,16 @@ async function verifyOtp(code){
     });
     if(res.error) throw res.error;
     state.session = res.data.session;
-    // Forgot-PIN flow: wipe the old hash, then force new-PIN setup here
-    // (no reload — we already know what screen comes next).
-    if(authFlow.mode === 'otp-reset'){
-      try{ await sb.rpc('clear_pin'); }catch(e){}
-      renderAuthSetPin(true);
-      return;
-    }
-    // Normal OTP path: after verifyOtp the Supabase JS client takes a
-    // beat to propagate the new token into subsequent requests, which has
-    // been causing wrong UI routing. A magic-link click works cleanly
-    // because the page reloads naturally — we do the same here: reload
-    // and let boot() pick up the fresh session.
+    // The Supabase JS client takes a moment to wire the new token into
+    // subsequent requests, which has historically caused race conditions
+    // in routing. A page reload sidesteps that entirely — boot() reads
+    // the fresh session from localStorage and lands the user in the app.
     setAuthMsg('info','Signing you in…');
-    setTimeout(function(){
-      window.location.reload();
-    }, 250);
+    setTimeout(function(){ window.location.reload(); }, 250);
   }catch(err){
     btn.disabled=false; btn.textContent='Verify';
     setAuthMsg('err','Incorrect or expired code. Try again.');
   }
-}
-
-// ---- Screen: create / reset PIN ----
-function renderAuthSetPin(isReset){
-  $('auth-content').innerHTML=
-    '<h1>'+(isReset?'Set a new PIN':'Create your PIN')+'</h1>'+
-    '<div class="auth-sub">Choose a 4-digit PIN. You\'ll use it to sign in quickly next time.</div>'+
-    '<label for="pin1">New PIN</label>'+
-    '<input type="password" id="pin1" class="field" inputmode="numeric" maxlength="4" '+
-      'placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">'+
-    '<label for="pin2" style="margin-top:14px;display:block;text-align:left;'+
-      'font-size:12px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;">Confirm PIN</label>'+
-    '<input type="password" id="pin2" class="field" inputmode="numeric" maxlength="4" '+
-      'placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px;">'+
-    '<button class="btn btn-primary" id="setpin-btn" style="margin-top:16px;">Save PIN</button>'+
-    '<div class="msg" id="auth-msg"></div>';
-  $('pin1').focus();
-  $('setpin-btn').onclick=submitNewPin;
-  $('pin2').addEventListener('keydown',function(e){
-    if(e.key==='Enter') submitNewPin();
-  });
-}
-async function submitNewPin(){
-  var p1=$('pin1').value, p2=$('pin2').value;
-  if(!/^\d{4}$/.test(p1)){ setAuthMsg('err','PIN must be exactly 4 digits.'); return; }
-  if(p1!==p2){ setAuthMsg('err','The two PINs don\'t match.'); return; }
-  var btn=$('setpin-btn');
-  btn.disabled=true; btn.textContent='Saving…';
-  try{
-    var res=await sb.rpc('set_pin',{ p_new_pin:p1 });
-    if(res.error) throw res.error;
-    // PIN set — proceed into the app.
-    enterApp();
-  }catch(err){
-    btn.disabled=false; btn.textContent='Save PIN';
-    setAuthMsg('err',err.message||'Could not save PIN.');
-  }
-}
-
-// ---- Screen: enter PIN ----
-function renderAuthPin(){
-  $('auth-content').innerHTML=
-    '<h1>Enter your PIN</h1>'+
-    '<div class="auth-sub">Signing in as<br><strong>'+esc(authFlow.email)+'</strong></div>'+
-    '<input type="password" id="pin" class="field" inputmode="numeric" maxlength="4" '+
-      'placeholder="••••" style="text-align:center;font-size:24px;letter-spacing:10px;">'+
-    '<button class="btn btn-primary" id="pin-btn" style="margin-top:16px;">Sign in</button>'+
-    '<button class="btn btn-secondary" id="pin-forgot" style="margin-top:10px;">Forgot PIN?</button>'+
-    '<button class="btn btn-secondary" id="pin-back" style="margin-top:10px;">Use a different email</button>'+
-    '<div class="msg" id="auth-msg"></div>';
-  var inp=$('pin');
-  inp.focus();
-  $('pin-btn').onclick=function(){ submitPin(inp.value); };
-  inp.addEventListener('keydown',function(e){
-    if(e.key==='Enter') submitPin(inp.value);
-  });
-  $('pin-forgot').onclick=async function(){
-    setAuthMsg('info','Sending a reset code…');
-    try{ await sendOtp('otp-reset'); }
-    catch(err){ setAuthMsg('err',err.message||'Could not send code.'); }
-  };
-  $('pin-back').onclick=renderAuthEmail;
-}
-async function submitPin(pin){
-  if(!/^\d{4}$/.test(pin)){ setAuthMsg('err','Enter your 4-digit PIN.'); return; }
-  var btn=$('pin-btn');
-  btn.disabled=true; btn.textContent='Checking…';
-  try{
-    var res=await sb.rpc('verify_pin',{ p_pin:pin });
-    if(res.error) throw res.error;
-    // verify_pin RETURNS a status string (it no longer throws for
-    // wrong/locked, so the attempt counter persists).
-    var result=String(res.data||'');
-    if(result==='ok'){
-      enterApp();
-      return;
-    }
-    btn.disabled=false; btn.textContent='Sign in';
-    if(result==='LOCKED'){
-      renderAuthLocked(null);
-    }else if(result.indexOf('WRONG:')===0){
-      var left=result.split('WRONG:')[1];
-      setAuthMsg('err','Incorrect PIN. '+left+' attempt'+(left==='1'?'':'s')+' left.');
-      $('pin').value='';
-      $('pin').focus();
-    }else if(result==='NO_PIN'){
-      renderAuthSetPin(false);
-    }else if(result.indexOf('ERR:')===0){
-      setAuthMsg('err',result.slice(4));
-    }else{
-      setAuthMsg('err','Could not verify PIN.');
-    }
-  }catch(err){
-    btn.disabled=false; btn.textContent='Sign in';
-    setAuthMsg('err',err.message||'Could not verify PIN.');
-  }
-}
-
-// ---- Screen: locked out ----
-function renderAuthLocked(until){
-  var when='';
-  if(until){
-    var d=new Date(until);
-    when=' until '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-  }
-  $('auth-content').innerHTML=
-    '<h1>Too many attempts</h1>'+
-    '<div class="auth-sub">This account is locked for 15 minutes after 3 wrong PIN entries'+when+'. '+
-    'You can reset your PIN by email instead.</div>'+
-    '<button class="btn btn-primary" id="locked-reset">Reset PIN by email</button>'+
-    '<button class="btn btn-secondary" id="locked-back" style="margin-top:10px;">Back</button>'+
-    '<div class="msg" id="auth-msg"></div>';
-  $('locked-reset').onclick=async function(){
-    setAuthMsg('info','Sending a reset code…');
-    try{ await sendOtp('otp-reset'); }
-    catch(err){ setAuthMsg('err',err.message||'Could not send code.'); }
-  };
-  $('locked-back').onclick=renderAuthEmail;
 }
 
 // ============================================================
@@ -1566,38 +1391,9 @@ async function doSignOut(){
   showAuth();
 }
 
-// ---- Change PIN ----
-function openChangePin(){
-  $('cp-old').value=''; $('cp-new').value=''; $('cp-new2').value='';
-  $('cp-msg').className='msg';
-  closeModal('modal-account');
-  openModal('modal-change-pin');
-  setTimeout(function(){ $('cp-old').focus(); },150);
-}
-async function saveChangePin(){
-  var oldP=$('cp-old').value, n1=$('cp-new').value, n2=$('cp-new2').value;
-  function cpMsg(type,text){ $('cp-msg').className='msg show '+type; $('cp-msg').textContent=text; }
-  if(!/^\d{4}$/.test(oldP)){ cpMsg('err','Enter your current 4-digit PIN.'); return; }
-  if(!/^\d{4}$/.test(n1)){ cpMsg('err','New PIN must be exactly 4 digits.'); return; }
-  if(n1!==n2){ cpMsg('err','The new PINs don\'t match.'); return; }
-  if(n1===oldP){ cpMsg('err','New PIN must be different from the current one.'); return; }
-  var btn=$('cp-save');
-  btn.disabled=true; btn.textContent='Saving…';
-  try{
-    var res=await sb.rpc('set_pin',{ p_new_pin:n1, p_old_pin:oldP });
-    if(res.error) throw res.error;
-    closeModal('modal-change-pin');
-    toast('PIN changed');
-  }catch(err){
-    cpMsg('err',err.message||'Could not change PIN.');
-  }
-  btn.disabled=false; btn.textContent='Save';
-}
-
 // ============================================================
 //  ROUTING
 // ============================================================
-// enterApp() runs only AFTER the PIN (or PIN setup) has been passed.
 async function enterApp(){
   try{
     var res=await sb.from('profiles').select('*')
@@ -1625,19 +1421,8 @@ async function enterApp(){
 function showAuth(){
   hide('view-trips');
   show('view-auth');
-  authFlow={ email:'', mode:'' };
+  authFlow={ email:'' };
   renderAuthEmail();
-}
-
-// Called on boot when a Supabase session already exists on this device.
-// The user is "known" but must still pass the PIN lock screen.
-async function resumeWithSession(){
-  var email=(state.session.user&&state.session.user.email||'').toLowerCase();
-  authFlow={ email:email, mode:'pin' };
-  // With option A, a valid session means the user is in. The PIN is just
-  // an optional quick-access shortcut they can set up later from the
-  // account menu, so we never gate the app on it here.
-  enterApp();
 }
 
 // ============================================================
@@ -1654,13 +1439,7 @@ $('nt-name').addEventListener('keydown',function(e){
 });
 $('acc-close').onclick=function(){ closeModal('modal-account'); };
 $('acc-signout').onclick=doSignOut;
-$('acc-change-pin').onclick=openChangePin;
-$('cp-cancel').onclick=function(){ closeModal('modal-change-pin'); };
-$('cp-save').onclick=saveChangePin;
-$('cp-new2').addEventListener('keydown',function(e){
-  if(e.key==='Enter') saveChangePin();
-});
-['modal-new-trip','modal-account','modal-change-pin','modal-add-person','modal-expense'].forEach(function(id){
+['modal-new-trip','modal-account','modal-add-person','modal-expense'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
@@ -1736,15 +1515,23 @@ async function boot(){
   state.session = (res.data && res.data.session) || null;
   if(state.session){
     // Existing session on this device — go straight in.
-    resumeWithSession();
+    enterApp();
   }else{
     showAuth();
   }
-  // We only need to react to sign-out elsewhere; sign-ins are handled by
-  // verifyOtp (reload) and resumeWithSession (boot from a fresh tab).
+  // Sign-ins happen via OTP verify (page reload) or magic-link click
+  // (Supabase parses the URL and fires SIGNED_IN). For magic-link, the
+  // page also reloads soon after; for safety we treat any new sign-in
+  // as a cue to enter the app.
   sb.auth.onAuthStateChange(function(event, session){
     state.session = session;
     if(event === 'SIGNED_OUT'){ showAuth(); }
+    if(event === 'SIGNED_IN'){
+      // If the app is not visible yet, route in.
+      if(document.getElementById('view-trips').hidden){
+        enterApp();
+      }
+    }
   });
 }
 boot();
