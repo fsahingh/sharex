@@ -614,7 +614,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.3';
+var APP_VERSION = 'V2-2.4';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -686,15 +686,18 @@ function setAuthMsg(type,text){
   m.className='msg show '+type; m.textContent=text;
 }
 
-// ---- Screen: enter email ----
+// ---- Welcome / sign-in screen ----
 function renderAuthEmail(){
   $('auth-content').innerHTML =
-    '<h1>Sign in</h1>'+
-    '<div class="auth-sub">Enter your email and we\'ll send you a one-time code.</div>'+
+    '<h1>Welcome</h1>'+
+    '<div class="auth-sub">Enter your email and we\'ll send you a secure sign-in link.</div>'+
     '<label for="email">Email address</label>'+
     '<input type="email" id="email" class="field" placeholder="you@example.com" '+
       'autocomplete="email" value="'+esc(authFlow.email)+'">'+
-    '<button class="btn btn-primary" id="email-btn" style="margin-top:16px;">Send code</button>'+
+    '<button class="btn btn-primary" id="email-btn" style="margin-top:16px;">Sign in</button>'+
+    '<div style="font-size:12px;color:var(--c-text-3);text-align:center;margin-top:14px;">'+
+      'Don\'t have an account yet?</div>'+
+    '<button class="btn btn-secondary" id="request-btn" style="margin-top:6px;">Request site access</button>'+
     '<div class="msg" id="auth-msg"></div>';
   var inp=$('email');
   inp.focus();
@@ -702,6 +705,7 @@ function renderAuthEmail(){
   inp.addEventListener('keydown',function(e){
     if(e.key==='Enter') submitEmail(inp.value.trim());
   });
+  $('request-btn').onclick=renderRequestAccess;
 }
 
 async function submitEmail(email){
@@ -711,76 +715,96 @@ async function submitEmail(email){
   }
   authFlow.email=email.toLowerCase();
   var btn=$('email-btn');
-  btn.disabled=true; btn.textContent='Sending…';
-  setAuthMsg('info','Sending a code to your email…');
+  btn.disabled=true; btn.textContent='Checking…';
+  setAuthMsg('info','Checking your access…');
   try{
+    // Check if this email is approved BEFORE sending a magic link, so we
+    // can show the "request access" prompt instead of wasting an email.
+    var ok = await sb.rpc('is_email_approved',{ p_email:authFlow.email });
+    if(ok.error) throw ok.error;
+    if(!ok.data){
+      btn.disabled=false; btn.textContent='Sign in';
+      setAuthMsg('err','We don\'t recognize this email. Tap "Request site access" below to apply.');
+      return;
+    }
+    btn.textContent='Sending…';
     var res=await sb.auth.signInWithOtp({
       email:authFlow.email,
       options:{ emailRedirectTo: window.location.origin+window.location.pathname }
     });
     if(res.error) throw res.error;
-    renderAuthOtp();
+    renderAuthSent();
   }catch(err){
-    btn.disabled=false; btn.textContent='Send code';
-    setAuthMsg('err',err.message||'Could not send code.');
+    btn.disabled=false; btn.textContent='Sign in';
+    setAuthMsg('err',err.message||'Could not send link.');
   }
 }
 
-// ---- Screen: enter OTP code ----
-function renderAuthOtp(){
+// ---- "Check your email" screen ----
+function renderAuthSent(){
   $('auth-content').innerHTML=
-    '<h1>Enter code</h1>'+
-    '<div class="auth-sub">We emailed a sign-in code to<br><strong>'+esc(authFlow.email)+'</strong>.<br>'+
-    'You can also click the link in the email instead.</div>'+
-    '<label for="otp">Sign-in code</label>'+
-    '<input type="text" id="otp" class="field" inputmode="numeric" '+
-      'autocomplete="one-time-code" maxlength="8" placeholder="000000" '+
-      'style="text-align:center;font-size:22px;letter-spacing:6px;">'+
-    '<button class="btn btn-primary" id="otp-btn" style="margin-top:16px;">Verify</button>'+
-    '<button class="btn btn-secondary" id="otp-resend" style="margin-top:10px;">Resend code</button>'+
-    '<button class="btn btn-secondary" id="otp-back" style="margin-top:10px;">Use a different email</button>'+
-    '<div class="msg" id="auth-msg"></div>';
-  var inp=$('otp');
-  inp.focus();
-  $('otp-btn').onclick=function(){ verifyOtp(inp.value.trim()); };
-  inp.addEventListener('keydown',function(e){
-    if(e.key==='Enter') verifyOtp(inp.value.trim());
-  });
-  $('otp-resend').onclick=async function(){
-    try{
-      var res=await sb.auth.signInWithOtp({
-        email:authFlow.email,
-        options:{ emailRedirectTo: window.location.origin+window.location.pathname }
-      });
-      if(res.error) throw res.error;
-      setAuthMsg('info','A new code is on its way.');
-    }catch(err){ setAuthMsg('err',err.message||'Could not resend.'); }
-  };
-  $('otp-back').onclick=renderAuthEmail;
+    '<h1>Check your email</h1>'+
+    '<div class="auth-sub">We sent a sign-in link to<br><strong>'+esc(authFlow.email)+'</strong>.<br><br>'+
+    'Open the email and tap the link to sign in.</div>'+
+    '<div class="msg show info">The link expires in 1 hour. No email? Check spam or try again.</div>'+
+    '<button class="btn btn-secondary" id="sent-back" style="margin-top:14px;">Use a different email</button>';
+  $('sent-back').onclick=renderAuthEmail;
 }
 
-async function verifyOtp(code){
-  if(!code||!/^\d{4,8}$/.test(code)){
-    setAuthMsg('err','Enter the code from your email.');
+// ---- "Request access" screen ----
+function renderRequestAccess(){
+  $('auth-content').innerHTML=
+    '<h1>Request access</h1>'+
+    '<div class="auth-sub">Tell us who you are. The site admin will review your request.</div>'+
+    '<div style="display:flex;gap:10px;">'+
+      '<div style="flex:1;">'+
+        '<label for="req-first">First name</label>'+
+        '<input type="text" id="req-first" class="field" maxlength="40">'+
+      '</div>'+
+      '<div style="flex:1;">'+
+        '<label for="req-last">Last name</label>'+
+        '<input type="text" id="req-last" class="field" maxlength="40">'+
+      '</div>'+
+    '</div>'+
+    '<label for="req-email" style="margin-top:14px;">Email</label>'+
+    '<input type="email" id="req-email" class="field" placeholder="you@example.com" '+
+      'autocomplete="email" value="'+esc(authFlow.email)+'">'+
+    '<button class="btn btn-primary" id="req-submit" style="margin-top:16px;">Submit request</button>'+
+    '<button class="btn btn-secondary" id="req-back" style="margin-top:10px;">Back to sign in</button>'+
+    '<div class="msg" id="auth-msg"></div>';
+  $('req-first').focus();
+  $('req-back').onclick=renderAuthEmail;
+  $('req-submit').onclick=submitAccessRequest;
+}
+
+async function submitAccessRequest(){
+  var first=$('req-first').value.trim();
+  var last =$('req-last').value.trim();
+  var email=$('req-email').value.trim().toLowerCase();
+  if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    setAuthMsg('err','Please enter a valid email.');
     return;
   }
-  var btn=$('otp-btn');
-  btn.disabled=true; btn.textContent='Verifying…';
+  if(!first){
+    setAuthMsg('err','First name is required.');
+    return;
+  }
+  var btn=$('req-submit');
+  btn.disabled=true; btn.textContent='Submitting…';
   try{
-    var res=await sb.auth.verifyOtp({
-      email:authFlow.email, token:code, type:'email'
+    var res=await sb.rpc('submit_access_request',{
+      p_email:email, p_first_name:first, p_last_name:last
     });
     if(res.error) throw res.error;
-    state.session = res.data.session;
-    // The Supabase JS client takes a moment to wire the new token into
-    // subsequent requests, which has historically caused race conditions
-    // in routing. A page reload sidesteps that entirely — boot() reads
-    // the fresh session from localStorage and lands the user in the app.
-    setAuthMsg('info','Signing you in…');
-    setTimeout(function(){ window.location.reload(); }, 250);
+    $('auth-content').innerHTML=
+      '<h1>Request sent</h1>'+
+      '<div class="auth-sub">Thanks, <strong>'+esc(first)+'</strong>. The admin will review your request.<br><br>'+
+      'When approved, you\'ll be able to sign in with <strong>'+esc(email)+'</strong>.</div>'+
+      '<button class="btn btn-secondary" id="req-done" style="margin-top:14px;">Back to sign in</button>';
+    $('req-done').onclick=renderAuthEmail;
   }catch(err){
-    btn.disabled=false; btn.textContent='Verify';
-    setAuthMsg('err','Incorrect or expired code. Try again.');
+    btn.disabled=false; btn.textContent='Submit request';
+    setAuthMsg('err',err.message||'Could not submit request.');
   }
 }
 
@@ -1742,6 +1766,7 @@ async function deleteEditPerson(){
 //  NOTIFICATIONS — pending change requests
 // ============================================================
 state.notifs = [];
+state.accessRequests = [];
 
 // Refresh the bell badge from the server. Called on enter + after actions.
 async function refreshNotifs(){
@@ -1752,7 +1777,15 @@ async function refreshNotifs(){
   }catch(err){
     state.notifs = [];
   }
-  var n = state.notifs.length;
+  // Access requests are only visible to the global admin.
+  state.accessRequests = [];
+  if(state.profile && state.profile.is_global_admin){
+    try{
+      var ar = await sb.rpc('list_access_requests');
+      if(!ar.error) state.accessRequests = ar.data || [];
+    }catch(e){ /* ignore */ }
+  }
+  var n = state.notifs.length + state.accessRequests.length;
   ['bell-badge','bell-badge-2','bell-badge-3'].forEach(function(id){
     var el = $(id);
     if(!el) return;
@@ -1774,13 +1807,27 @@ function openNotifs(){
 function renderNotifs(){
   var el = $('notif-body');
   var list = state.notifs || [];
-  if(list.length === 0){
+  var access = state.accessRequests || [];
+  if(list.length === 0 && access.length === 0){
     el.innerHTML =
       '<div class="empty"><div class="empty-title">No notifications</div>'+
-      '<div class="empty-sub">You\'ll see pending change requests here.</div></div>';
+      '<div class="empty-sub">You\'ll see pending requests here.</div></div>';
     return;
   }
   var h = '';
+  // ---- Access requests (global admin only) ----
+  access.forEach(function(a){
+    var nm = ((a.first_name||'')+' '+(a.last_name||'')).trim() || a.email;
+    h += '<div class="notif-card">'+
+      '<div class="notif-head">Access request</div>'+
+      '<div class="notif-title">'+esc(nm)+'</div>'+
+      '<div class="notif-sub">'+esc(a.email)+'</div>'+
+      '<div class="notif-actions">'+
+        '<button class="btn btn-reject" data-ar-reject="'+a.id+'">Reject</button>'+
+        '<button class="btn btn-approve" data-ar-approve="'+a.id+'">Approve</button>'+
+      '</div></div>';
+  });
+  // ---- Change requests ----
   list.forEach(function(r){
     var isEdit = r.request_type === 'edit';
     var headTxt = isEdit ? 'Edit request' : 'Delete request';
@@ -1827,6 +1874,10 @@ function renderNotifs(){
   });
   el.innerHTML = h;
   el.onclick = function(ev){
+    var aa = ev.target.closest('[data-ar-approve]');
+    if(aa){ doApproveAccess(aa.dataset.arApprove); return; }
+    var ar = ev.target.closest('[data-ar-reject]');
+    if(ar){ doRejectAccess(ar.dataset.arReject); return; }
     var a = ev.target.closest('[data-approve]');
     if(a){ doApproveRequest(a.dataset.approve); return; }
     var r = ev.target.closest('[data-reject]');
@@ -1834,6 +1885,31 @@ function renderNotifs(){
     var c = ev.target.closest('[data-cancel]');
     if(c){ doCancelRequest(c.dataset.cancel); return; }
   };
+}
+
+async function doApproveAccess(id){
+  if(!confirm('Approve this access request? The user will be able to sign in.')) return;
+  try{
+    var res = await sb.rpc('approve_access_request',{ p_req:id });
+    if(res.error) throw res.error;
+    toast('Approved');
+    await refreshNotifs();
+    renderNotifs();
+  }catch(err){
+    toast(err.message || 'Could not approve', true);
+  }
+}
+async function doRejectAccess(id){
+  if(!confirm('Reject this access request?')) return;
+  try{
+    var res = await sb.rpc('reject_access_request',{ p_req:id });
+    if(res.error) throw res.error;
+    toast('Rejected');
+    await refreshNotifs();
+    renderNotifs();
+  }catch(err){
+    toast(err.message || 'Could not reject', true);
+  }
 }
 
 async function doApproveRequest(id){
