@@ -644,6 +644,16 @@
       <label for="ep-email" style="margin-top:14px;">Email</label>
       <input type="email" id="ep-email" class="field" placeholder="email@example.com">
       <div id="ep-email-note" class="msg show info" style="font-size:12px;" hidden></div>
+      <!-- Send invite — shows only when the person has an email but no
+           linked account. Sends a magic-link sign-in email to them. -->
+      <button type="button" id="ep-invite" hidden
+        style="margin-top:12px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;
+               padding:10px;background:var(--c-tint-bg);color:var(--c-tint);
+               border:1px solid var(--c-tint);border-radius:var(--r-sm);
+               font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <span>Send sign-in invite</span>
+      </button>
       <div id="ep-trips-section" style="margin-top:18px;" hidden>
         <div class="tab-count" style="padding:0 0 6px;">Trips</div>
         <div id="ep-trips-list" class="balance-list" style="margin-bottom:0;"></div>
@@ -847,7 +857,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-3.4';
+var APP_VERSION = 'V2-3.5';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -861,6 +871,17 @@ var sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storage: window.localStorage
+  }
+});
+
+// Side client used purely for triggering magic-link sends to invite
+// other people. It has its own (in-memory) auth state so calling
+// signInWithOtp on it does not touch the current user's session at all.
+var sbInvite = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
   }
 });
 
@@ -2427,6 +2448,7 @@ async function openEditPerson(dirId){
   hide('ep-email-note');
   hide('ep-trips-section');
   $('ep-trips-list').innerHTML='';
+  $('ep-invite').hidden = true;
   // Start disabled while we load
   $('ep-save').textContent = 'Save';
   $('ep-save').disabled = true;
@@ -2448,6 +2470,10 @@ async function openEditPerson(dirId){
       $('ep-email').disabled = false;
       hide('ep-email-note');
     }
+    // "Send sign-in invite" — only when the person has an email but
+    // no account yet. (If they already have an account, they don't need
+    // an invite; they can just sign in.)
+    $('ep-invite').hidden = !(p.email && !p.has_account);
     // Snapshot original values so we can detect changes.
     state.editPersonOriginal = JSON.stringify(readEditPersonForm());
     $('ep-save').disabled = true;   // nothing changed yet
@@ -2543,6 +2569,43 @@ async function deleteEditPerson(){
   }catch(err){
     toast(err.message||'Could not delete', true);
   }
+}
+
+// Send a magic-link sign-in invite to the person being edited. Uses the
+// side client (sbInvite) so we don't disturb the current session.
+async function sendSignInInvite(){
+  if(!state.editingPerson) return;
+  var p = state.editingPerson;
+  if(!p.email){
+    toast('No email on file for this person.', true);
+    return;
+  }
+  if(p.has_account){
+    toast('This person already has an account.', true);
+    return;
+  }
+  var nm = ((p.first_name||'') + ' ' + (p.last_name||'')).trim() || p.email;
+  if(!await alertModal('Send a sign-in invite to '+nm+'?\n\nThey will receive an email with a link they can tap to access the app.',
+       { confirm:true, confirmLabel:'Send' })){
+    return;
+  }
+  var btn = $('ep-invite');
+  btn.disabled = true;
+  var label = btn.querySelector('span');
+  var origLabel = label ? label.textContent : 'Send sign-in invite';
+  if(label) label.textContent = 'Sending…';
+  try{
+    var res = await sbInvite.auth.signInWithOtp({
+      email: p.email,
+      options: { emailRedirectTo: window.location.origin + window.location.pathname }
+    });
+    if(res.error) throw res.error;
+    toast('Invite sent to '+p.email);
+  }catch(err){
+    toast(err.message || 'Could not send invite', true);
+  }
+  btn.disabled = false;
+  if(label) label.textContent = origLabel;
 }
 
 // ============================================================
@@ -3130,6 +3193,7 @@ $('rj-submit').onclick = submitReject;
 $('ep-cancel').onclick=function(){ closeModal('modal-edit-person'); };
 $('ep-save').onclick=saveEditPerson;
 $('ep-delete').onclick=deleteEditPerson;
+$('ep-invite').onclick=sendSignInInvite;
 // Track changes so Save stays disabled until the user actually changes something.
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
