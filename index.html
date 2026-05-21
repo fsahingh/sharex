@@ -514,7 +514,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-1.6';
+var APP_VERSION = 'V2-1.7';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -692,46 +692,18 @@ async function verifyOtp(code){
       email:authFlow.email, token:code, type:'email'
     });
     if(res.error) throw res.error;
-    state.session=res.data.session;
-
-    if(authFlow.mode==='otp-reset'){
-      // Forgot-PIN flow: wipe the old hash, force new-PIN setup.
+    state.session = res.data.session;
+    // For the forgot-PIN path, do the clear_pin and route ourselves;
+    // the SIGNED_IN listener skips otp-reset mode so it won't conflict.
+    if(authFlow.mode === 'otp-reset'){
       try{ await sb.rpc('clear_pin'); }catch(e){}
       renderAuthSetPin(true);
       return;
     }
-
-    // verifyOtp returns a session, but the JS client may take a beat to
-    // wire that token into subsequent requests. If we query profiles
-    // immediately we sometimes hit RLS as anon and get an empty result —
-    // which would wrongly send a returning user to PIN setup.
-    // Fix: poll a few times with a short delay until the query succeeds.
-    var hasPin = false;
-    var profileFound = false;
-    for(var attempt=0; attempt<5; attempt++){
-      try{
-        var pr = await sb.from('profiles')
-          .select('pin_hash').eq('id', res.data.session.user.id).single();
-        if(!pr.error && pr.data){
-          hasPin = (pr.data.pin_hash != null);
-          profileFound = true;
-          break;
-        }
-      }catch(e){ /* try again */ }
-      await new Promise(function(r){ setTimeout(r, 200); });
-    }
-    if(!profileFound){
-      // Couldn't read the profile after several tries. Safest bet: let
-      // them into the app. If they truly have no PIN they can add one
-      // from "Change my PIN" later.
-      enterApp();
-      return;
-    }
-    if(hasPin){
-      enterApp();
-    }else{
-      renderAuthSetPin(false);
-    }
+    // Normal OTP path: show a brief "signing in…" state and let the
+    // onAuthStateChange listener (boot) handle routing — same code path
+    // as a magic-link click, which we know works.
+    setAuthMsg('info','Signing you in…');
   }catch(err){
     btn.disabled=false; btn.textContent='Verify';
     setAuthMsg('err','Incorrect or expired code. Try again.');
@@ -1758,16 +1730,54 @@ async function boot(){
   var res=await sb.auth.getSession();
   state.session = (res.data && res.data.session) || null;
   if(state.session){
-    // Known device — show the PIN lock screen (or setup).
+    // Existing session on this device — go straight in.
     resumeWithSession();
   }else{
     showAuth();
   }
-  // React to sign-out elsewhere. We deliberately do NOT auto-enter the app
-  // on SIGNED_IN here — entering happens only after the PIN step.
-  sb.auth.onAuthStateChange(function(event,session){
-    state.session=session;
-    if(event==='SIGNED_OUT'){ showAuth(); }
+  // Single source of truth for post-signin routing. Fires for both
+  // OTP-code verification AND magic-link clicks, so both flows behave
+  // identically.
+  sb.auth.onAuthStateChange(async function(event, session){
+    state.session = session;
+    if(event === 'SIGNED_OUT'){
+      showAuth();
+      return;
+    }
+    if(event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED'){
+      // Only act on real sign-ins, not on every token refresh during a
+      // healthy session.
+      if(event === 'TOKEN_REFRESHED') return;
+      if(authFlow.mode === 'otp-reset'){
+        // Forgot-PIN flow handles its own routing after clear_pin.
+        return;
+      }
+      // Look up own profile; route to PIN setup or straight into app.
+      var hasPin = false;
+      var profileFound = false;
+      for(var attempt = 0; attempt < 5; attempt++){
+        try{
+          var pr = await sb.from('profiles')
+            .select('pin_hash').eq('id', session.user.id).single();
+          if(!pr.error && pr.data){
+            hasPin = (pr.data.pin_hash != null);
+            profileFound = true;
+            break;
+          }
+        }catch(e){ /* retry */ }
+        await new Promise(function(r){ setTimeout(r, 200); });
+      }
+      if(!profileFound || hasPin){
+        // Either we couldn't read (rare) — safest is to enter. Or PIN
+        // exists — also enter.
+        enterApp();
+      }else{
+        // No PIN yet — first-time setup before entering.
+        show('view-auth');
+        hide('view-trips');
+        renderAuthSetPin(false);
+      }
+    }
   });
 }
 boot();
