@@ -1444,7 +1444,8 @@ function renderPeopleTab(){
   var t=state.trip;
   var el=$('tab-people');
   var n=(t.members||[]).length;
-  var canEditDirectory = !!(state.profile && state.profile.is_global_admin);
+  var canEditDirectory = !!(state.profile && state.profile.is_global_admin)
+                       || !!(state.trip && state.trip.is_admin);
   // Count non-global admins on this trip — used to decide whether the
   // "Make admin" star is shown (cap of 2, global admin doesn't count).
   var nonGlobalAdminCount = (t.members||[]).filter(function(m){
