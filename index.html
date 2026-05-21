@@ -239,6 +239,25 @@
   .transfer-arrow{width:18px;height:18px;color:var(--c-text-3);flex-shrink:0;}
   .transfer-amount{margin-left:auto;font-weight:700;color:var(--c-tint);}
 
+  /* ---- DIRECTORY ---- */
+  .dir-row{display:flex;align-items:center;gap:12px;padding:12px 14px;
+    background:var(--c-card);border-radius:var(--r);margin-bottom:8px;
+    box-shadow:var(--shadow);width:100%;text-align:left;cursor:pointer;
+    border:none;color:inherit;font-family:inherit;}
+  .dir-row:active{background:var(--c-bg);}
+  .dir-info{flex:1;min-width:0;}
+  .dir-name-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .dir-name{font-size:15px;font-weight:600;}
+  .dir-meta{font-size:12px;color:var(--c-text-2);margin-top:2px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dir-trips-badge{font-size:11px;color:var(--c-text-3);flex-shrink:0;}
+
+  /* ---- EDIT PERSON: trips list ---- */
+  .ep-trip-row{display:flex;align-items:center;justify-content:space-between;
+    padding:9px 12px;border-bottom:0.5px solid var(--c-border);font-size:13px;}
+  .ep-trip-row:last-child{border-bottom:none;}
+  .ep-trip-row .pill{font-size:10px;padding:2px 8px;}
+
   /* ---- TRIP CARDS ---- */
   .trip-card{background:var(--c-card);border-radius:var(--r);margin-bottom:12px;
     box-shadow:var(--shadow);overflow:hidden;}
@@ -334,6 +353,9 @@
   <div class="header">
     <span class="header-title">Trips</span>
     <div class="header-right">
+      <button class="icon-btn" id="btn-directory" title="Directory">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </button>
       <button class="icon-btn" id="btn-account" title="Account">
         <span class="avatar" id="avatar">?</span>
       </button>
@@ -341,6 +363,22 @@
   </div>
   <div class="content" id="trips-content"></div>
   <button class="fab" id="fab-new-trip" title="New trip">+</button>
+</div>
+
+<!-- ======================= DIRECTORY ======================= -->
+<div id="view-directory" hidden>
+  <div class="header">
+    <button class="icon-btn" id="dir-back" title="Back">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <span class="header-title" style="flex:1;text-align:center;font-size:16px;">Directory</span>
+    <div class="header-right">
+      <button class="icon-btn" id="btn-account-3" title="Account">
+        <span class="avatar" id="avatar-3">?</span>
+      </button>
+    </div>
+  </div>
+  <div class="content" id="directory-content"></div>
 </div>
 
 <!-- ======================= TRIP DETAIL ======================= -->
@@ -406,6 +444,40 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" id="ap-cancel">Cancel</button>
       <button class="btn btn-primary" id="ap-save">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= EDIT PERSON MODAL ======================= -->
+<div class="modal" id="modal-edit-person" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Edit Person</div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label for="ep-first">First name</label>
+          <input type="text" id="ep-first" class="field" maxlength="40">
+        </div>
+        <div style="flex:1;">
+          <label for="ep-last">Last name</label>
+          <input type="text" id="ep-last" class="field" maxlength="40">
+        </div>
+      </div>
+      <label for="ep-email" style="margin-top:14px;">Email</label>
+      <input type="email" id="ep-email" class="field" placeholder="email@example.com">
+      <div id="ep-email-note" class="msg show info" style="font-size:12px;" hidden></div>
+      <div id="ep-trips-section" style="margin-top:18px;" hidden>
+        <div class="tab-count" style="padding:0 0 6px;">Trips</div>
+        <div id="ep-trips-list" class="balance-list" style="margin-bottom:0;"></div>
+      </div>
+      <div class="msg" id="ep-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ep-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;font-size:20px;">×</button>
+      <button class="btn btn-secondary" id="ep-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ep-save">Save</button>
     </div>
   </div>
 </div>
@@ -488,7 +560,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-2.0';
+var APP_VERSION = 'V2-2.1';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1392,6 +1464,177 @@ async function doSignOut(){
 }
 
 // ============================================================
+//  DIRECTORY
+// ============================================================
+state.directory = [];
+
+async function openDirectory(){
+  // Both Account modal and Directory live on top of "view-trips"-ish chrome;
+  // closing the account modal first keeps the UI clean if invoked from there.
+  closeModal('modal-account');
+  hide('view-trips');
+  hide('view-trip');
+  show('view-directory');
+  $('directory-content').innerHTML =
+    '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('list_directory');
+    if(res.error) throw res.error;
+    state.directory = res.data || [];
+    renderDirectory();
+  }catch(err){
+    $('directory-content').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load directory</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function renderDirectory(){
+  var el = $('directory-content');
+  var list = state.directory || [];
+  if(list.length === 0){
+    el.innerHTML =
+      '<div class="empty"><div class="empty-title">No people yet</div>'+
+      '<div class="empty-sub">Add people to a trip to see them here.</div></div>';
+    return;
+  }
+  var isAdmin = !!(state.profile && state.profile.is_global_admin);
+  var h = '<div class="tab-count">'+list.length+' '+
+    (list.length===1?'person':'people')+'</div>';
+  list.forEach(function(p){
+    var nm = p.display_name || p.email || 'Unnamed';
+    var initial = ((p.first_name||p.email||'?')[0]||'?').toUpperCase();
+    h += '<button class="dir-row" data-dir="'+p.directory_id+'">'+
+      '<div class="person-avatar">'+esc(initial)+'</div>'+
+      '<div class="dir-info">'+
+        '<div class="dir-name-row">'+
+          '<span class="dir-name">'+esc(nm)+'</span>'+
+          (p.is_me ? '<span class="pico me">You</span>' : '')+
+          (!p.has_account ? '<span class="pico noacc">No account</span>' : '')+
+        '</div>'+
+        (p.email ? '<div class="dir-meta">'+esc(p.email)+'</div>' : '')+
+      '</div>'+
+      '<span class="dir-trips-badge">'+p.trip_count+' '+
+        (p.trip_count===1?'trip':'trips')+'</span>'+
+      '</button>';
+  });
+  el.innerHTML = h;
+  // Only the global admin can open the editor.
+  el.onclick = function(ev){
+    var row = ev.target.closest('[data-dir]');
+    if(!row) return;
+    if(isAdmin){
+      openEditPerson(row.dataset.dir);
+    }
+  };
+}
+
+function closeDirectory(){
+  hide('view-directory');
+  show('view-trips');
+}
+
+// ----- Edit Person -----
+state.editingPerson = null;
+
+async function openEditPerson(dirId){
+  state.editingPerson = null;
+  $('ep-first').value=''; $('ep-last').value=''; $('ep-email').value='';
+  $('ep-msg').className='msg';
+  hide('ep-email-note');
+  hide('ep-trips-section');
+  $('ep-trips-list').innerHTML='';
+  openModal('modal-edit-person');
+  try{
+    var res = await sb.rpc('get_directory_person',{ p_dir:dirId });
+    if(res.error) throw res.error;
+    var p = res.data;
+    state.editingPerson = p;
+    $('ep-first').value = p.first_name || '';
+    $('ep-last').value  = p.last_name  || '';
+    $('ep-email').value = p.email      || '';
+    if(p.has_account){
+      $('ep-email').disabled = true;
+      $('ep-email-note').textContent =
+        'This person has an account — their email is managed by their sign-in and cannot be changed here.';
+      show('ep-email-note');
+    }else{
+      $('ep-email').disabled = false;
+      hide('ep-email-note');
+    }
+    // Trips
+    if(p.trips && p.trips.length){
+      var th = '';
+      p.trips.forEach(function(t){
+        th += '<div class="ep-trip-row">'+
+          '<span>'+esc(t.name)+'</span>'+
+          '<span class="pill '+(t.settled?'settled':'even')+'">'+
+            (t.settled?'Settled':'Active')+'</span>'+
+          '</div>';
+      });
+      $('ep-trips-list').innerHTML = th;
+      show('ep-trips-section');
+    }
+    // Delete button: admin, not self, no active trips, no expense history
+    var canDelete = state.profile && state.profile.is_global_admin
+                 && !(p.profile_id && p.profile_id === state.session.user.id)
+                 && (p.unsettled_trip_count === 0)
+                 && (p.expense_count === 0);
+    $('ep-delete').hidden = !canDelete;
+  }catch(err){
+    closeModal('modal-edit-person');
+    toast(err.message||'Could not load person', true);
+  }
+}
+
+async function saveEditPerson(){
+  if(!state.editingPerson) return;
+  var p = state.editingPerson;
+  var first = $('ep-first').value.trim();
+  var last  = $('ep-last').value.trim();
+  var email = $('ep-email').value.trim();
+  function setMsg(text){ $('ep-msg').className='msg show err'; $('ep-msg').textContent=text; }
+  if(!first && !last && !email){
+    setMsg('Provide at least a name or email.');
+    return;
+  }
+  var btn = $('ep-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var res = await sb.rpc('update_directory_person', {
+      p_dir: p.directory_id,
+      p_first_name: first,
+      p_last_name: last,
+      p_email: p.has_account ? null : email
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-edit-person');
+    toast('Saved');
+    await openDirectory();   // reload list
+  }catch(err){
+    setMsg(err.message || 'Could not save.');
+  }
+  btn.disabled = false; btn.textContent = 'Save';
+}
+
+async function deleteEditPerson(){
+  if(!state.editingPerson) return;
+  var p = state.editingPerson;
+  var nm = (p.first_name||'') + ' ' + (p.last_name||'');
+  nm = nm.trim() || p.email || 'this person';
+  if(!confirm('Delete '+nm+' from the directory? This cannot be undone.')) return;
+  try{
+    var res = await sb.rpc('delete_directory_person',{ p_dir:p.directory_id });
+    if(res.error) throw res.error;
+    closeModal('modal-edit-person');
+    toast('Deleted');
+    await openDirectory();
+  }catch(err){
+    toast(err.message||'Could not delete', true);
+  }
+}
+
+// ============================================================
 //  ROUTING
 // ============================================================
 async function enterApp(){
@@ -1412,7 +1655,10 @@ async function enterApp(){
   var initial=(nm[0]||'?').toUpperCase();
   $('avatar').textContent=initial;
   $('avatar-2').textContent=initial;
+  $('avatar-3').textContent=initial;
   hide('view-auth');
+  hide('view-trip');
+  hide('view-directory');
   show('view-trips');
   loadTrips();
 }
@@ -1432,6 +1678,9 @@ $('auth-ver').textContent='Shared Expenses · '+APP_VERSION;
 $('fab-new-trip').onclick=openNewTrip;
 $('btn-account').onclick=openAccount;
 $('btn-account-2').onclick=openAccount;
+$('btn-account-3').onclick=openAccount;
+$('btn-directory').onclick=openDirectory;
+$('dir-back').onclick=closeDirectory;
 $('nt-cancel').onclick=function(){ closeModal('modal-new-trip'); };
 $('nt-create').onclick=createTrip;
 $('nt-name').addEventListener('keydown',function(e){
@@ -1439,7 +1688,11 @@ $('nt-name').addEventListener('keydown',function(e){
 });
 $('acc-close').onclick=function(){ closeModal('modal-account'); };
 $('acc-signout').onclick=doSignOut;
-['modal-new-trip','modal-account','modal-add-person','modal-expense'].forEach(function(id){
+// Edit-person modal wiring
+$('ep-cancel').onclick=function(){ closeModal('modal-edit-person'); };
+$('ep-save').onclick=saveEditPerson;
+$('ep-delete').onclick=deleteEditPerson;
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
