@@ -682,7 +682,9 @@
       <div class="msg" id="ep-msg"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-secondary" id="ep-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;font-size:20px;">×</button>
+      <button class="btn btn-secondary" id="ep-delete" hidden style="background:rgba(255,59,48,0.10);color:var(--c-danger);border-color:transparent;flex:0 0 auto;width:46px;padding:0;display:flex;align-items:center;justify-content:center;">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+      </button>
       <button class="btn btn-secondary" id="ep-cancel">Cancel</button>
       <button class="btn btn-primary" id="ep-save">Save</button>
     </div>
@@ -909,7 +911,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.5';
+var APP_VERSION = 'V2-4.6';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
