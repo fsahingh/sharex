@@ -909,9 +909,17 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.1';
+var APP_VERSION = 'V2-4.4';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
+
+// Apps Script Web App URL — receives POSTs and sends HTML emails through
+// the deployer's Gmail. Configured in mail-proxy.gs. The token is a weak
+// "secret" shared between this client and that script; users can read it
+// from the page source, so don't treat it as real security — it's just a
+// speed bump against random scrapers hitting the URL.
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwd3vf7bohnPBKhBihPt44RfRaFogNhwHfmB5KSTiw08kpQvhvygrAWbQtFl8kNNrF7FQ/exec';
+var APPS_SCRIPT_TOKEN = '12lknds9wrlknds0w3rnlewkfn203rhnewlkn120921hnwlfk';
 
 // persistSession keeps the login token in localStorage so closing and
 // reopening the page does NOT require signing in again. autoRefreshToken
@@ -2800,8 +2808,9 @@ async function sendBulkInvites(){
   var origLabel = btn.textContent;
   btn.textContent = 'Sending…';
   var sent = 0, failed = 0;
-  // Send sequentially; Supabase's anon-key rate limits would punish big
-  // parallel batches anyway, and order doesn't matter here.
+  // sbInvite is a side client with persistSession=false so this doesn't
+  // touch the active user's auth state. Magic-link template comes from
+  // Supabase Auth → Email Templates.
   for(var i = 0; i < emails.length; i++){
     try{
       var res = await sbInvite.auth.signInWithOtp({
@@ -2824,19 +2833,15 @@ async function sendBulkInvites(){
 }
 
 // ============================================================
-//  SHARE SETTLEMENT — personalized emails, one at a time
+//  SHARE SETTLEMENT — silent send via Edge Function
 // ============================================================
-// Each recipient gets a mailto: with only their own info: per-person
-// total, what they paid, their net (owe/owed), and the transfers they
-// are part of. Because browsers refuse to open multiple mailto: in a
-// row, we send them one at a time — after each send, the modal shows
-// the queue with the next person ready to send.
+// The admin picks recipients, taps Share, and the edge function
+// `share-settlement` sends each one a personalised HTML email (via
+// Resend). No mailto, no client-side email composer.
 state.shareReport = null;
-state.shareQueue = [];   // list of recipient directory_ids still waiting
 
 async function openShareSettlement(){
   if(!state.trip) return;
-  state.shareQueue = [];
   openModal('modal-share');
   $('share-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
   try{
@@ -2865,165 +2870,95 @@ function renderShareList(){
     if(aHas !== bHas) return aHas ? -1 : 1;
     return (a.display_name||'').localeCompare(b.display_name||'');
   });
-  var queueSet = new Set(state.shareQueue);
-  var inQueueMode = state.shareQueue.length > 0;
-  var h = '';
-  if(inQueueMode){
-    h += '<div style="font-size:12.5px;color:var(--c-text-2);margin-bottom:10px;line-height:1.45;">'+
-      '<strong>'+state.shareQueue.length+'</strong> recipient'+(state.shareQueue.length===1?'':'s')+' left. '+
-      'Tap <strong>Send next</strong> to open the email for the next person — your email app will open '+
-      'with the message pre-filled. Repeat until the list is empty.</div>';
-  }else{
-    h += '<div style="font-size:12.5px;color:var(--c-text-2);margin-bottom:10px;line-height:1.45;">'+
-      'Select who should receive the settlement summary. Each person will get a '+
-      'personal email with their own balance and the transfers they need to make.</div>';
-    h += '<div class="ep-pick-tools">'+
-      '<button id="share-pick-all">Select all eligible</button>'+
-      '<button id="share-pick-none">Clear</button></div>';
-  }
+  var h = '<div style="font-size:12.5px;color:var(--c-text-2);margin-bottom:10px;'+
+    'line-height:1.45;">Select who should receive a personal settlement email. '+
+    'Each person will get their own balance and a list of the transfers '+
+    'they need to make.</div>';
+  h += '<div class="ep-pick-tools">'+
+    '<button id="share-pick-all">Select all eligible</button>'+
+    '<button id="share-pick-none">Clear</button></div>';
   var anyEligible = false;
   members.forEach(function(m){
     var hasEmail = !!m.email;
     if(hasEmail) anyEligible = true;
-    if(inQueueMode){
-      // In queue mode, only show recipients still waiting — and highlight
-      // the next one in line.
-      if(!queueSet.has(m.directory_id)) return;
-      var isNext = (state.shareQueue[0] === m.directory_id);
-      h += '<div class="inv-row'+(isNext?' next':'')+'">'+
-        (isNext ? '<span class="share-next-dot">→</span>'
-                : '<span class="share-next-dot empty"></span>')+
-        '<span class="inv-name">'+esc(m.display_name)+'</span>'+
-        '<span class="inv-email">'+esc(m.email)+'</span>'+
-        '</div>';
-    }else{
-      h += '<label class="inv-row'+(hasEmail?'':' disabled')+'">'+
-        '<input type="checkbox" data-mid="'+m.directory_id+'"'+
-          (hasEmail ? '' : ' disabled')+'>'+
-        '<span class="inv-name">'+esc(m.display_name)+'</span>'+
-        '<span class="inv-email">'+(m.email ? esc(m.email) : 'No email')+'</span>'+
-        '</label>';
-    }
+    h += '<label class="inv-row'+(hasEmail?'':' disabled')+'">'+
+      '<input type="checkbox" data-mid="'+m.directory_id+'"'+
+        (hasEmail ? '' : ' disabled')+'>'+
+      '<span class="inv-name">'+esc(m.display_name)+'</span>'+
+      '<span class="inv-email">'+(m.email ? esc(m.email) : 'No email')+'</span>'+
+      '</label>';
   });
-  if(!inQueueMode){
-    if(members.length === 0){
-      h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
-        'No other members to share with.</div></div>';
-    }else if(!anyEligible){
-      h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
-        'None of the other members have an email on file yet.</div></div>';
-    }
+  if(members.length === 0){
+    h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
+      'No other members to share with.</div></div>';
+  }else if(!anyEligible){
+    h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
+      'None of the other members have an email on file yet.</div></div>';
   }
   $('share-body').innerHTML = h;
-  if(!inQueueMode){
-    $('share-pick-all').onclick = function(){
-      $('share-body').querySelectorAll('input[data-mid]:not([disabled])').forEach(function(cb){ cb.checked = true; });
-      updateShareSendLabel();
-    };
-    $('share-pick-none').onclick = function(){
-      $('share-body').querySelectorAll('input[data-mid]').forEach(function(cb){ cb.checked = false; });
-      updateShareSendLabel();
-    };
-    $('share-body').addEventListener('change', updateShareSendLabel);
-  }
+  $('share-pick-all').onclick = function(){
+    $('share-body').querySelectorAll('input[data-mid]:not([disabled])').forEach(function(cb){ cb.checked = true; });
+    updateShareSendLabel();
+  };
+  $('share-pick-none').onclick = function(){
+    $('share-body').querySelectorAll('input[data-mid]').forEach(function(cb){ cb.checked = false; });
+    updateShareSendLabel();
+  };
+  $('share-body').addEventListener('change', updateShareSendLabel);
   updateShareSendLabel();
 }
 
 function updateShareSendLabel(){
+  var n = $('share-body').querySelectorAll('input[data-mid]:checked').length;
   var btn = $('share-send');
-  if(state.shareQueue.length > 0){
-    btn.disabled = false;
-    btn.textContent = 'Send next ('+state.shareQueue.length+' left)';
-  }else{
-    var n = ($('share-body').querySelectorAll('input[data-mid]:checked')||[]).length;
-    btn.disabled = (n === 0);
-    btn.textContent = n === 0 ? 'Start' : ('Start ('+n+')');
-  }
+  btn.disabled = (n === 0);
+  btn.textContent = n === 0 ? 'Share' : ('Share ('+n+')');
 }
 
-// Build the per-recipient email body. The recipient is identified by
-// directory_id; everything else comes from state.shareReport.
-function buildPersonalEmailBody(recipientDirId){
+async function doShareSend(){
   var r = state.shareReport;
-  if(!r) return '';
-  var nameOf = {};
-  (r.members||[]).forEach(function(m){ nameOf[m.directory_id] = m.display_name || 'Member'; });
-  var myName = nameOf[recipientDirId] || 'there';
-  var myBal = (r.balances||[]).find(function(b){ return b.directory_id === recipientDirId; });
-  var paid = myBal ? Number(myBal.paid)||0 : 0;
-  var net  = myBal ? Number(myBal.net)||0  : 0;
-  var myTransfersOut = (r.transfers||[]).filter(function(t){ return t.from === recipientDirId; });
-  var myTransfersIn  = (r.transfers||[]).filter(function(t){ return t.to   === recipientDirId; });
-  var lines = [];
-  lines.push('Hi '+myName+',');
-  lines.push('');
-  lines.push('Here is your share of "'+r.trip_name+'".');
-  lines.push('');
-  lines.push('Trip total: $'+Number(r.total||0).toFixed(2));
-  lines.push('Per person: $'+Number(r.per_person||0).toFixed(2));
-  lines.push('');
-  lines.push('You paid: $'+paid.toFixed(2));
-  if(Math.abs(net) < 0.005){
-    lines.push('You are settled up.');
-  }else if(net > 0){
-    lines.push('You are owed: $'+net.toFixed(2));
-  }else{
-    lines.push('You owe: $'+(-net).toFixed(2));
-  }
-  lines.push('');
-  if(myTransfersOut.length === 0 && myTransfersIn.length === 0){
-    lines.push('No transfers needed on your side.');
-  }else{
-    lines.push('--- Your settlements ---');
-    myTransfersOut.forEach(function(t){
-      lines.push('Pay '+(nameOf[t.to]||'Member')+': $'+Number(t.amount).toFixed(2));
+  if(!r || !state.trip) return;
+  var rows = $('share-body').querySelectorAll('input[data-mid]:checked');
+  if(rows.length === 0) return;
+  var dirIds = [];
+  rows.forEach(function(cb){ dirIds.push(cb.dataset.mid); });
+  var btn = $('share-send');
+  btn.disabled = true;
+  var origLabel = btn.textContent;
+  btn.textContent = 'Sending…';
+  try{
+    // We already loaded the full report in openShareSettlement → state.shareReport.
+    // Just POST it (plus recipient list + shared token) to the Apps Script proxy.
+    // Apps Script's CORS quirk: it only returns Access-Control-Allow-Origin:*
+    // when the request doesn't have custom headers, so we send a plain
+    // text/plain body and let the script JSON.parse it.
+    var resp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      // text/plain dodges CORS preflight; Apps Script accepts the raw text
+      // and we parse it server-side.
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        token: APPS_SCRIPT_TOKEN,
+        action: 'send_settlement',
+        report: r,
+        recipient_directory_ids: dirIds
+      })
     });
-    myTransfersIn.forEach(function(t){
-      lines.push('Receive from '+(nameOf[t.from]||'Member')+': $'+Number(t.amount).toFixed(2));
-    });
-  }
-  lines.push('');
-  lines.push('— Shared Expenses');
-  return lines.join('\n');
-}
-
-function doShareSend(){
-  var r = state.shareReport;
-  if(!r) return;
-  // If no queue yet, build one from the selected checkboxes.
-  if(state.shareQueue.length === 0){
-    var rows = $('share-body').querySelectorAll('input[data-mid]:checked');
-    if(rows.length === 0) return;
-    state.shareQueue = [];
-    rows.forEach(function(cb){ state.shareQueue.push(cb.dataset.mid); });
-  }
-  // Pull the next recipient and open their personal mailto:.
-  var dirId = state.shareQueue.shift();
-  var member = (r.members||[]).find(function(m){ return m.directory_id === dirId; });
-  if(!member || !member.email){
-    // Skip a recipient without email (shouldn't normally happen).
-    if(state.shareQueue.length > 0){
-      doShareSend();
-      return;
-    }
-    closeModal('modal-share');
-    return;
-  }
-  var subject = 'Your settlement for "'+(r.trip_name||'trip')+'"';
-  var body = buildPersonalEmailBody(dirId);
-  var url = 'mailto:'+encodeURIComponent(member.email)+
-            '?subject='+encodeURIComponent(subject)+
-            '&body='+encodeURIComponent(body);
-  window.location.href = url;
-  // After this returns, re-render the modal so the user can send the next one.
-  if(state.shareQueue.length > 0){
-    setTimeout(renderShareList, 100);
-  }else{
-    setTimeout(function(){
+    var data = await resp.json();
+    if(data.error) throw new Error(data.error);
+    var sent = data.sent || 0;
+    var failed = data.failed || 0;
+    if(failed === 0){
+      toast('Sent '+sent+' settlement'+(sent===1?'':'s'));
       closeModal('modal-share');
-      toast('All settlements sent');
-    }, 300);
+    }else{
+      toast('Sent '+sent+', '+failed+' failed', true);
+    }
+  }catch(err){
+    toast(err.message || 'Could not send', true);
   }
+  btn.disabled = false;
+  btn.textContent = origLabel;
 }
 
 // ============================================================
@@ -3668,10 +3603,7 @@ $('ep-pick-done').onclick = applyExpensePicker;
 $('inv-cancel').onclick = function(){ closeModal('modal-invite'); };
 $('inv-send').onclick = sendBulkInvites;
 // Share settlement modal
-$('share-cancel').onclick = function(){
-  state.shareQueue = [];
-  closeModal('modal-share');
-};
+$('share-cancel').onclick = function(){ closeModal('modal-share'); };
 $('share-send').onclick = doShareSend;
 $('ap-search').addEventListener('input', function(){
   // Typing in search clears any previous directory pick
