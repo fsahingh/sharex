@@ -227,17 +227,17 @@
     font-family:inherit;}
 
   /* ---- BULK INVITE LIST ---- */
-  .inv-row{display:flex;align-items:center;gap:12px;padding:12px 14px;
-    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:8px;
+  .inv-row{display:flex;align-items:center;gap:14px;padding:10px 14px;
+    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:4px;
     cursor:pointer;min-width:0;}
   .inv-row.disabled{opacity:0.5;cursor:not-allowed;}
   .inv-row input{width:18px;height:18px;accent-color:var(--c-tint);
     flex-shrink:0;margin:0;}
   .inv-row.disabled input{cursor:not-allowed;}
   .inv-name{font-size:14px;font-weight:600;flex-shrink:0;
-    max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .inv-email{flex:1;font-size:12.5px;color:var(--c-text-2);text-align:right;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-left:auto;}
 
   /* ---- SETTLEMENT TAB ---- */
   .settle-summary{background:var(--c-card);border-radius:var(--r);
@@ -257,8 +257,13 @@
     text-transform:uppercase;letter-spacing:.3px;text-align:center;}
   .ss-lock.unlocked{color:var(--c-success);}
   .ss-lock.locked{color:var(--c-warn);background:rgba(255,149,0,0.08);}
+  .ss-lock.share{color:var(--c-tint);background:rgba(10,132,255,0.08);}
   .ss-lock.tappable{cursor:pointer;}
   .ss-lock.tappable:active{transform:scale(0.96);}
+  /* When the trip is settled, the center column shows lock + share side by side. */
+  .ss-center-row{display:flex;flex-direction:column;gap:6px;align-items:stretch;}
+  .ss-center-row .ss-lock{min-width:90px;padding:6px 10px;}
+  .ss-center-row .ss-lock-icon svg{width:24px;height:24px;}
 
   /* "You paid" + "Your net" side-by-side */
   .my-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
@@ -445,7 +450,9 @@
     display:flex;flex-direction:column;}
   @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
   .modal-handle{width:36px;height:4px;border-radius:2px;background:var(--c-text-3);
-    margin:10px auto 14px;opacity:.4;flex-shrink:0;}
+    margin:10px auto 14px;opacity:.4;flex-shrink:0;cursor:grab;
+    padding:6px 30px;background-clip:content-box;touch-action:none;}
+  .modal-handle:active{cursor:grabbing;opacity:.6;}
   .modal-title{font-size:18px;font-weight:700;text-align:center;margin-bottom:16px;
     flex-shrink:0;}
   /* The body is the only scrolling region. Sheet/handle/title/actions stay put. */
@@ -719,6 +726,22 @@
   </div>
 </div>
 
+<!-- ======================= SHARE SETTLEMENT MODAL ======================= -->
+<!-- Used on settled trips. Admin picks recipients and the app sends each
+     of them a personalized email summary of their balance/transfers. -->
+<div class="modal" id="modal-share" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-width:420px;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Share settlement</div>
+    <div class="modal-body" id="share-body" style="min-height:140px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="share-cancel">Close</button>
+      <button class="btn btn-primary" id="share-send" disabled>Send</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= BULK INVITE MODAL ======================= -->
 <div class="modal" id="modal-invite" hidden>
   <div class="modal-backdrop"></div>
@@ -877,7 +900,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-3.8';
+var APP_VERSION = 'V2-3.9';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -985,6 +1008,60 @@ function overlayOff(){
 }
 function openModal(id){ show(id); document.body.style.overflow='hidden'; }
 function closeModal(id){ hide(id); document.body.style.overflow=''; }
+
+// Make every modal handle act as a "drag down to dismiss" affordance.
+// Touch & mouse work the same. The sheet follows the finger downward,
+// then either snaps back (if released < 80px) or closes (if >= 80px).
+(function setupSheetDrag(){
+  var dragging = false;
+  var startY = 0;
+  var currentY = 0;
+  var sheet = null;
+  var modal = null;
+  function onDown(ev){
+    var handle = ev.target.closest('.modal-handle');
+    if(!handle) return;
+    sheet = handle.closest('.modal-sheet');
+    modal = handle.closest('.modal');
+    if(!sheet || !modal || modal.classList.contains('modal-center')) return;
+    dragging = true;
+    startY = (ev.touches ? ev.touches[0].clientY : ev.clientY);
+    currentY = startY;
+    sheet.style.transition = 'none';
+    if(ev.cancelable) ev.preventDefault();
+  }
+  function onMove(ev){
+    if(!dragging || !sheet) return;
+    currentY = (ev.touches ? ev.touches[0].clientY : ev.clientY);
+    var dy = Math.max(0, currentY - startY);
+    sheet.style.transform = 'translateY('+dy+'px)';
+  }
+  function onUp(){
+    if(!dragging || !sheet) return;
+    var dy = Math.max(0, currentY - startY);
+    sheet.style.transition = 'transform .2s ease-out';
+    if(dy >= 80){
+      // Animate off-screen then actually close.
+      sheet.style.transform = 'translateY(100%)';
+      var m = modal;
+      setTimeout(function(){
+        if(m && m.id) closeModal(m.id);
+        if(sheet){ sheet.style.transform=''; sheet.style.transition=''; }
+      }, 200);
+    }else{
+      sheet.style.transform = '';
+    }
+    dragging = false;
+    sheet = null;
+    modal = null;
+  }
+  document.addEventListener('touchstart', onDown, { passive:false });
+  document.addEventListener('touchmove',  onMove, { passive:true });
+  document.addEventListener('touchend',   onUp);
+  document.addEventListener('mousedown',  onDown);
+  document.addEventListener('mousemove',  onMove);
+  document.addEventListener('mouseup',    onUp);
+})();
 
 // ============================================================
 // ============================================================
@@ -2012,6 +2089,7 @@ function renderSettlementTab(){
   // --- Summary card: total + per-person, with center lock toggle ---
   // Lock icon goes in the middle column. Active trip = open-padlock (green)
   // = click to settle. Settled trip = closed-padlock (orange) = click to reopen.
+  // Settled trip also shows a Share button next to the lock.
   // Non-admins see the icon but it isn't clickable.
   var lockSvg = t.settled
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
@@ -2019,17 +2097,40 @@ function renderSettlementTab(){
   var lockState = t.settled ? 'locked' : 'unlocked';
   var lockHint = t.is_admin
     ? (t.settled ? 'Tap to reopen' : 'Tap to settle')
-    : (t.settled ? 'Trip is settled' : 'Trip is active');
+    : (t.settled ? 'Settled' : 'Active');
   var lockAttr = (t.is_admin && total>0) ? ' id="settle-toggle" role="button"' : '';
+
+  // Center column: lock alone when active, lock + share when settled.
+  var centerHtml;
+  if(t.settled){
+    var shareAttr = t.is_admin ? ' id="settle-share" role="button"' : '';
+    var shareCls = 'ss-lock share' + (t.is_admin ? ' tappable' : '');
+    centerHtml =
+      '<div class="ss-center-row">'+
+        '<div class="ss-lock '+lockState+(t.is_admin&&total>0?' tappable':'')+'"'+lockAttr+'>'+
+          '<div class="ss-lock-icon">'+lockSvg+'</div>'+
+          '<div class="ss-lock-hint">'+esc(lockHint)+'</div>'+
+        '</div>'+
+        '<div class="'+shareCls+'"'+shareAttr+'>'+
+          '<div class="ss-lock-icon">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>'+
+          '</div>'+
+          '<div class="ss-lock-hint">Share</div>'+
+        '</div>'+
+      '</div>';
+  }else{
+    centerHtml =
+      '<div class="ss-lock '+lockState+(t.is_admin&&total>0?' tappable':'')+'"'+lockAttr+'>'+
+        '<div class="ss-lock-icon">'+lockSvg+'</div>'+
+        '<div class="ss-lock-hint">'+esc(lockHint)+'</div>'+
+      '</div>';
+  }
 
   h += '<div class="settle-summary">'+
     '<div class="ss-grid">'+
       '<div class="ss-cell"><div class="ss-lbl">Total cost</div>'+
         '<div class="ss-val">'+money(total)+'</div></div>'+
-      '<div class="ss-lock '+lockState+(t.is_admin&&total>0?' tappable':'')+'"'+lockAttr+'>'+
-        '<div class="ss-lock-icon">'+lockSvg+'</div>'+
-        '<div class="ss-lock-hint">'+esc(lockHint)+'</div>'+
-      '</div>'+
+      centerHtml+
       '<div class="ss-cell"><div class="ss-lbl">Per person</div>'+
         '<div class="ss-val">'+money(perPerson)+'</div></div>'+
     '</div>'+
@@ -2104,6 +2205,8 @@ function renderSettlementTab(){
   $('tab-settlement').innerHTML = h;
   var toggle = $('settle-toggle');
   if(toggle) toggle.onclick = t.settled ? doUnsettle : doSettle;
+  var shareBtn = $('settle-share');
+  if(shareBtn) shareBtn.onclick = openShareSettlement;
 }
 
 async function doSettle(){
@@ -2704,6 +2807,144 @@ async function sendBulkInvites(){
 }
 
 // ============================================================
+//  SHARE SETTLEMENT
+// ============================================================
+state.shareReport = null;
+
+async function openShareSettlement(){
+  if(!state.trip) return;
+  openModal('modal-share');
+  $('share-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_full_settlement_report',
+      { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    state.shareReport = res.data;
+    renderShareList();
+  }catch(err){
+    $('share-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function renderShareList(){
+  var r = state.shareReport;
+  if(!r){ return; }
+  var t = state.trip;
+  var myDirId = t.my_directory_id || null;
+  // Same filter/sort as invite list: skip self, emails-first.
+  var members = (r.members || []).filter(function(m){
+    return m.directory_id !== myDirId;
+  });
+  members.sort(function(a,b){
+    var aHas = !!a.email, bHas = !!b.email;
+    if(aHas !== bHas) return aHas ? -1 : 1;
+    return (a.display_name||'').localeCompare(b.display_name||'');
+  });
+  var h = '<div style="font-size:12.5px;color:var(--c-text-2);margin-bottom:10px;'+
+    'line-height:1.45;">Select who should receive the settlement summary. '+
+    'They will get a copy of the totals and the who-pays-whom list.</div>';
+  h += '<div class="ep-pick-tools">'+
+    '<button id="share-pick-all">Select all eligible</button>'+
+    '<button id="share-pick-none">Clear</button></div>';
+  var anyEligible = false;
+  members.forEach(function(m){
+    var hasEmail = !!m.email;
+    if(hasEmail) anyEligible = true;
+    h += '<label class="inv-row'+(hasEmail?'':' disabled')+'">'+
+      '<input type="checkbox" data-email="'+esc(m.email||'')+'"'+
+        (hasEmail ? '' : ' disabled')+'>'+
+      '<span class="inv-name">'+esc(m.display_name)+'</span>'+
+      '<span class="inv-email">'+(m.email ? esc(m.email) : 'No email')+'</span>'+
+      '</label>';
+  });
+  if(members.length === 0){
+    h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
+      'No other members to share with.</div></div>';
+  }else if(!anyEligible){
+    h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
+      'None of the other members have an email on file yet.</div></div>';
+  }
+  $('share-body').innerHTML = h;
+  $('share-pick-all').onclick = function(){
+    $('share-body').querySelectorAll('input[data-email]:not([disabled])').forEach(function(cb){ cb.checked = true; });
+    updateShareSendLabel();
+  };
+  $('share-pick-none').onclick = function(){
+    $('share-body').querySelectorAll('input[data-email]').forEach(function(cb){ cb.checked = false; });
+    updateShareSendLabel();
+  };
+  $('share-body').addEventListener('change', updateShareSendLabel);
+  updateShareSendLabel();
+}
+function updateShareSendLabel(){
+  var n = $('share-body').querySelectorAll('input[data-email]:checked').length;
+  var btn = $('share-send');
+  btn.disabled = (n === 0);
+  btn.textContent = n === 0 ? 'Send' : ('Send ('+n+')');
+}
+
+function buildShareEmailBody(){
+  var r = state.shareReport;
+  if(!r) return '';
+  // Map directory_id -> display name for lookups in transfers/balances.
+  var nameOf = {};
+  (r.members||[]).forEach(function(m){ nameOf[m.directory_id] = m.display_name || 'Member'; });
+  var lines = [];
+  lines.push('Settlement for "'+r.trip_name+'"');
+  lines.push('');
+  lines.push('Total: $'+Number(r.total||0).toFixed(2));
+  lines.push('Members: '+r.member_count);
+  lines.push('Per person: $'+Number(r.per_person||0).toFixed(2));
+  lines.push('');
+  lines.push('--- Balances ---');
+  (r.balances||[]).forEach(function(b){
+    var nm = nameOf[b.directory_id] || 'Member';
+    var net = Number(b.net)||0;
+    var paid = Number(b.paid)||0;
+    var note;
+    if(Math.abs(net) < 0.005) note = 'even';
+    else if(net > 0)          note = 'owed $'+net.toFixed(2);
+    else                      note = 'owes $'+(-net).toFixed(2);
+    lines.push(nm+': paid $'+paid.toFixed(2)+', '+note);
+  });
+  lines.push('');
+  if((r.transfers||[]).length === 0){
+    lines.push('--- Settlements ---');
+    lines.push('No transfers needed — everyone is even.');
+  }else{
+    lines.push('--- Who pays whom ---');
+    r.transfers.forEach(function(tr){
+      var fromN = nameOf[tr.from] || 'Member';
+      var toN   = nameOf[tr.to]   || 'Member';
+      lines.push(fromN+' → '+toN+': $'+Number(tr.amount).toFixed(2));
+    });
+  }
+  lines.push('');
+  lines.push('Generated by Shared Expenses');
+  return lines.join('\n');
+}
+
+function doShareSend(){
+  var rows = $('share-body').querySelectorAll('input[data-email]:checked');
+  if(rows.length === 0) return;
+  var emails = [];
+  rows.forEach(function(cb){ if(cb.dataset.email) emails.push(cb.dataset.email); });
+  if(!emails.length) return;
+  var subject = 'Settlement for "'+(state.shareReport.trip_name||'trip')+'"';
+  var body = buildShareEmailBody();
+  // Build mailto: with BCC so recipients don't see each other's emails.
+  var url = 'mailto:?bcc='+encodeURIComponent(emails.join(','))+
+            '&subject='+encodeURIComponent(subject)+
+            '&body='+encodeURIComponent(body);
+  // Open in the same window — the email client handles it. Some browsers
+  // need a true user-gesture-triggered navigation; this is one.
+  window.location.href = url;
+  closeModal('modal-share');
+}
+
+// ============================================================
 //  NOTIFICATIONS — pending change requests
 // ============================================================
 state.notifs = [];
@@ -3292,7 +3533,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite'].forEach(function(id){
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
@@ -3344,6 +3585,9 @@ $('ep-pick-done').onclick = applyExpensePicker;
 // Bulk invite modal
 $('inv-cancel').onclick = function(){ closeModal('modal-invite'); };
 $('inv-send').onclick = sendBulkInvites;
+// Share settlement modal
+$('share-cancel').onclick = function(){ closeModal('modal-share'); };
+$('share-send').onclick = doShareSend;
 $('ap-search').addEventListener('input', function(){
   // Typing in search clears any previous directory pick
   $('ap-results').dataset.pickedDir = '';
