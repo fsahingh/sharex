@@ -227,17 +227,19 @@
     font-family:inherit;}
 
   /* ---- BULK INVITE LIST ---- */
-  .inv-row{display:flex;align-items:center;gap:14px;padding:10px 14px;
-    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:4px;
-    cursor:pointer;min-width:0;}
+  .inv-row{display:flex !important;align-items:center;gap:16px;padding:12px 14px;
+    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:8px;
+    cursor:pointer;min-width:0;box-sizing:border-box;}
   .inv-row.disabled{opacity:0.5;cursor:not-allowed;}
-  .inv-row input{width:18px;height:18px;accent-color:var(--c-tint);
-    flex-shrink:0;margin:0;}
+  .inv-row > input[type="checkbox"]{width:18px;height:18px;accent-color:var(--c-tint);
+    flex-shrink:0;margin:0 !important;}
   .inv-row.disabled input{cursor:not-allowed;}
   .inv-name{font-size:14px;font-weight:600;flex-shrink:0;
-    max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .inv-email{flex:1;font-size:12.5px;color:var(--c-text-2);text-align:right;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-left:auto;}
+    max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    padding-right:8px;}
+  .inv-email{flex:1 1 0;font-size:12.5px;color:var(--c-text-2);text-align:right;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+    padding-left:8px;}
 
   /* Share-queue "next in line" indicator */
   .inv-row.next{border:2px solid var(--c-tint);background:var(--c-tint-bg);}
@@ -869,6 +871,7 @@
       <div style="font-size:14px;color:var(--c-text-2);margin-bottom:4px;">Signed in as</div>
       <div style="font-size:15px;font-weight:600;" id="acc-email"></div>
       <div style="font-size:13px;color:var(--c-text-3);margin-top:2px;" id="acc-role"></div>
+      <div style="font-size:11px;color:var(--c-text-3);margin-top:8px;opacity:0.7;" id="acc-version"></div>
       <button class="btn btn-secondary" id="acc-recycle" hidden style="margin-top:18px;display:flex;align-items:center;justify-content:center;gap:8px;">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
         <span>Recycle bin</span>
@@ -906,7 +909,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.0';
+var APP_VERSION = 'V2-4.1';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1034,6 +1037,7 @@ function closeModal(id){ hide(id); document.body.style.overflow=''; }
     startY = (ev.touches ? ev.touches[0].clientY : ev.clientY);
     currentY = startY;
     sheet.style.transition = 'none';
+    // Block scrolling while the drag is active.
     if(ev.cancelable) ev.preventDefault();
   }
   function onMove(ev){
@@ -1041,18 +1045,20 @@ function closeModal(id){ hide(id); document.body.style.overflow=''; }
     currentY = (ev.touches ? ev.touches[0].clientY : ev.clientY);
     var dy = Math.max(0, currentY - startY);
     sheet.style.transform = 'translateY('+dy+'px)';
+    // Block the browser from also scrolling the page while we drag.
+    if(ev.cancelable) ev.preventDefault();
   }
   function onUp(){
     if(!dragging || !sheet) return;
     var dy = Math.max(0, currentY - startY);
     sheet.style.transition = 'transform .2s ease-out';
     if(dy >= 80){
-      // Animate off-screen then actually close.
       sheet.style.transform = 'translateY(100%)';
       var m = modal;
+      var s = sheet;
       setTimeout(function(){
         if(m && m.id) closeModal(m.id);
-        if(sheet){ sheet.style.transform=''; sheet.style.transition=''; }
+        if(s){ s.style.transform=''; s.style.transition=''; }
       }, 200);
     }else{
       sheet.style.transform = '';
@@ -1061,12 +1067,16 @@ function closeModal(id){ hide(id); document.body.style.overflow=''; }
     sheet = null;
     modal = null;
   }
+  // Touch listeners need passive:false to allow preventDefault, which we
+  // call to block the page from scrolling while the user is dragging.
   document.addEventListener('touchstart', onDown, { passive:false });
-  document.addEventListener('touchmove',  onMove, { passive:true });
+  document.addEventListener('touchmove',  onMove, { passive:false });
   document.addEventListener('touchend',   onUp);
+  document.addEventListener('touchcancel',onUp);
   document.addEventListener('mousedown',  onDown);
   document.addEventListener('mousemove',  onMove);
   document.addEventListener('mouseup',    onUp);
+  document.addEventListener('mouseleave', onUp);
 })();
 
 // ============================================================
@@ -2486,6 +2496,7 @@ function openAccount(){
   $('acc-email').textContent=state.profile?state.profile.email:'';
   $('acc-role').textContent=state.profile&&state.profile.is_global_admin
     ? 'Global administrator' : 'Member';
+  $('acc-version').textContent='Shared Expenses · '+APP_VERSION;
   // Recycle bin entry — only the global admin can see it.
   $('acc-recycle').hidden = !(state.profile && state.profile.is_global_admin);
   openModal('modal-account');
