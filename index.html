@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shared">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a84ff">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Shared Expenses</title>
+<!-- PWA manifest (inline as a data URL so we don't need a second file
+     in the repo; iOS/Android both accept this). -->
+<link rel="manifest" href='data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22Shared%20Expenses%22%2C%22short_name%22%3A%22Shared%22%2C%22start_url%22%3A%22.%22%2C%22scope%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23f2f2f7%22%2C%22theme_color%22%3A%22%230a84ff%22%2C%22orientation%22%3A%22portrait%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2522http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg%2522%2520viewBox%253D%25220%25200%2520512%2520512%2522%253E%253Crect%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520rx%253D%2522112%2522%2520fill%253D%2522%25230a84ff%2522%252F%253E%253Cpath%2520fill%253D%2522white%2522%2520d%253D%2522M156%2520176h200v40H156zm0%252080h200v40H156zm0%252080h120v40H156z%2522%252F%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22purpose%22%3A%22any%20maskable%22%7D%5D%7D'>
+<!-- Apple touch icon (inline SVG; iOS will rasterise as needed). -->
+<link rel="apple-touch-icon" href='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22112%22 fill=%22%230a84ff%22/%3E%3Cpath fill=%22white%22 d=%22M156 176h200v40H156zm0 80h200v40H156zm0 80h120v40H156z%22/%3E%3C/svg%3E'>
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22112%22 fill=%22%230a84ff%22/%3E%3Cpath fill=%22white%22 d=%22M156 176h200v40H156zm0 80h200v40H156zm0 80h120v40H156z%22/%3E%3C/svg%3E'>
 <title>Shared Expenses</title>
 <style>
   :root{
@@ -921,7 +931,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.7';
+var APP_VERSION = 'V2-4.8';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -1175,11 +1185,66 @@ async function submitEmail(email){
 function renderAuthSent(){
   $('auth-content').innerHTML=
     '<h1>Check your email</h1>'+
-    '<div class="auth-sub">We sent a sign-in link to<br><strong>'+esc(authFlow.email)+'</strong>.<br><br>'+
-    'Open the email and tap the link to sign in.</div>'+
-    '<div class="msg show info">The link expires in 1 hour. No email? Check spam or try again.</div>'+
+    '<div class="auth-sub">We sent a sign-in email to<br><strong>'+esc(authFlow.email)+'</strong>.<br><br>'+
+    'Tap the link in the email, or enter the 6-digit code below.</div>'+
+    '<label for="otp-code" style="margin-top:14px;">Sign-in code</label>'+
+    '<input type="text" id="otp-code" class="field" inputmode="numeric" maxlength="6" '+
+      'autocomplete="one-time-code" pattern="[0-9]{6}" placeholder="123456" '+
+      'style="font-size:20px;letter-spacing:6px;text-align:center;font-weight:600;">'+
+    '<button class="btn btn-primary" id="otp-submit" style="margin-top:16px;">Verify code</button>'+
+    '<div class="msg" id="otp-msg"></div>'+
+    '<div class="msg show info" style="margin-top:14px;">The link and code both expire in 1 hour. No email? Check spam or '+
+      '<a href="#" id="otp-retry" style="color:var(--c-tint);text-decoration:none;font-weight:600;">try again</a>.</div>'+
     '<button class="btn btn-secondary" id="sent-back" style="margin-top:14px;">Use a different email</button>';
+  var input = $('otp-code');
+  // Auto-submit when 6 digits typed (nice on mobile keyboards).
+  input.oninput = function(){
+    input.value = input.value.replace(/\D/g,'').slice(0,6);
+    if(input.value.length === 6) submitOtpCode();
+  };
+  $('otp-submit').onclick = submitOtpCode;
+  $('otp-retry').onclick = function(ev){
+    ev.preventDefault();
+    renderAuthEmail();
+    // Convenience: prefill the email so the user can resend in one tap.
+    setTimeout(function(){
+      var em = $('auth-email');
+      if(em && authFlow.email){ em.value = authFlow.email; em.focus(); }
+    }, 50);
+  };
   $('sent-back').onclick=renderAuthEmail;
+  setTimeout(function(){ input.focus(); }, 100);
+}
+
+function setOtpMsg(type, text){
+  var m=$('otp-msg'); m.className='msg show '+type; m.textContent=text;
+}
+
+async function submitOtpCode(){
+  var code = $('otp-code').value.trim();
+  if(code.length !== 6){
+    setOtpMsg('err','Enter the 6-digit code from the email.');
+    return;
+  }
+  var btn = $('otp-submit');
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  try{
+    var res = await sb.auth.verifyOtp({
+      email: authFlow.email,
+      token: code,
+      type: 'email'
+    });
+    if(res.error) throw res.error;
+    // verifyOtp on success returns a session; the auth state listener
+    // will pick it up and route to the app. As a safety, force a reload
+    // if that doesn't happen within a second.
+    setTimeout(function(){
+      if(!state.session) window.location.reload();
+    }, 1000);
+  }catch(err){
+    btn.disabled = false; btn.textContent = 'Verify code';
+    setOtpMsg('err', err.message || 'Code was rejected. Check the email again.');
+  }
 }
 
 // ---- "Request access" screen ----
