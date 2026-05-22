@@ -580,6 +580,9 @@
     </div>
   </div>
   <div class="content" id="directory-content"></div>
+  <button class="fab" id="dir-fab" hidden title="Add person">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
 </div>
 
 <!-- ======================= TRIP DETAIL ======================= -->
@@ -632,12 +635,14 @@
   <div class="modal-backdrop"></div>
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <div class="modal-title">Add Person</div>
+    <div class="modal-title" id="ap-title">Add Person</div>
     <div class="modal-body">
-      <label for="ap-search">Search the directory</label>
-      <input type="text" id="ap-search" class="field" placeholder="Type a name or email…" autocomplete="off">
-      <div id="ap-results" class="ap-results" hidden></div>
-      <div style="font-size:12px;color:var(--c-text-3);margin:14px 0 4px;text-align:center;">— or add a new person —</div>
+      <div id="ap-search-wrap">
+        <label for="ap-search">Search the directory</label>
+        <input type="text" id="ap-search" class="field" placeholder="Type a name or email…" autocomplete="off">
+        <div id="ap-results" class="ap-results" hidden></div>
+        <div style="font-size:12px;color:var(--c-text-3);margin:14px 0 4px;text-align:center;">— or add a new person —</div>
+      </div>
       <div style="display:flex;gap:10px;">
         <div style="flex:1;">
           <label for="ap-first">First name</label>
@@ -931,7 +936,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.8';
+var APP_VERSION = 'V2-4.9';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2395,6 +2400,29 @@ async function doUnsettle(){
 // ----- Add Person modal -----
 var apSearchTimer=null;
 function openAddPerson(){
+  state.addPersonDirectoryOnly = false;
+  resetAddPersonModal();
+  $('ap-title').textContent = 'Add Person';
+  show('ap-search-wrap');
+  show('ap-include-section');
+  openModal('modal-add-person');
+  setTimeout(function(){ $('ap-search').focus(); },150);
+}
+
+// Directory-only mode: same modal, but search box and "include in expenses"
+// section are hidden — we're just creating a directory entry, not attaching
+// anyone to a trip.
+function openAddPersonDirectoryOnly(){
+  state.addPersonDirectoryOnly = true;
+  resetAddPersonModal();
+  $('ap-title').textContent = 'Add to Directory';
+  hide('ap-search-wrap');
+  hide('ap-include-section');
+  openModal('modal-add-person');
+  setTimeout(function(){ $('ap-first').focus(); },150);
+}
+
+function resetAddPersonModal(){
   $('ap-search').value='';
   $('ap-first').value='';
   $('ap-last').value='';
@@ -2404,13 +2432,14 @@ function openAddPerson(){
   hide('ap-custom-summary');
   $('ap-custom-summary').textContent='';
   state.apCustomIds = null;
-  // Reset radios + remove any hidden "custom" marker from a previous run.
-  document.querySelector('input[name="ap-include"][value="future"]').checked = true;
-  document.querySelector('input[name="ap-include"][value="all"]').checked = false;
+  // Reset include radios.
+  var futureR = document.querySelector('input[name="ap-include"][value="future"]');
+  var allR    = document.querySelector('input[name="ap-include"][value="all"]');
+  if(futureR) futureR.checked = true;
+  if(allR)    allR.checked = false;
   var oldMarker = document.querySelector('input[name="ap-include"][value="custom"]');
   if(oldMarker) oldMarker.remove();
-  openModal('modal-add-person');
-  setTimeout(function(){ $('ap-search').focus(); },150);
+  delete $('ap-results').dataset.pickedDir;
 }
 function setApMsg(type,text){
   var m=$('ap-msg'); m.className='msg show '+type; m.textContent=text;
@@ -2448,21 +2477,46 @@ async function runDirectorySearch(q){
 state.apCustomIds = null;
 
 async function saveAddPerson(){
-  var dirId = $('ap-results').dataset.pickedDir || null;
   var first = $('ap-first').value.trim();
   var last  = $('ap-last').value.trim();
   var email = $('ap-email').value.trim();
+  var btn=$('ap-save');
+
+  // ---- Directory-only mode: create the row, no trip involved. ----
+  if(state.addPersonDirectoryOnly){
+    if(!first && !last && !email){
+      setApMsg('err','Enter a name or email.');
+      return;
+    }
+    btn.disabled=true; btn.textContent='Adding…';
+    try{
+      var res = await sb.rpc('create_directory_person', {
+        p_first_name: first||null,
+        p_last_name:  last||null,
+        p_email:      email||null
+      });
+      if(res.error) throw res.error;
+      closeModal('modal-add-person');
+      toast('Added to directory');
+      // Refresh the directory list so the new person appears immediately.
+      if(!$('view-directory').hidden) await openDirectoryInternal();
+    }catch(err){
+      setApMsg('err', err.message||'Could not add person.');
+    }
+    btn.disabled=false; btn.textContent='Add';
+    return;
+  }
+
+  // ---- Default mode: adding to the current trip. ----
+  var dirId = $('ap-results').dataset.pickedDir || null;
   if(!dirId && !first && !email){
     setApMsg('err','Pick someone from the directory, or enter a name/email.');
     return;
   }
   var mode = (document.querySelector('input[name="ap-include"]:checked')||{}).value || 'future';
-  // If "custom" was picked but the user didn't actually choose any
-  // expenses, treat it as future-only — same behavior as not picking.
   var customIds = (state.apCustomIds && state.apCustomIds.length) ? state.apCustomIds : null;
   if(mode === 'custom' && !customIds){ mode = 'future'; }
 
-  var btn=$('ap-save');
   btn.disabled=true; btn.textContent='Adding…';
   try{
     var res=await sb.rpc('add_person_to_trip',{
@@ -2473,8 +2527,7 @@ async function saveAddPerson(){
       p_last_name: last||null
     });
     if(res.error) throw res.error;
-    var newDirId = res.data;   // directory id of the just-added member
-    // Retro-include the new member in selected expenses if asked.
+    var newDirId = res.data;
     if(mode === 'all'){
       try{
         await sb.rpc('include_member_in_expenses', {
@@ -2482,7 +2535,7 @@ async function saveAddPerson(){
           p_directory_id: newDirId,
           p_all: true
         });
-      }catch(e){ /* non-fatal; we already added the member */ }
+      }catch(e){ /* non-fatal */ }
     }else if(mode === 'custom' && customIds && customIds.length){
       try{
         await sb.rpc('include_member_in_expenses', {
@@ -2659,6 +2712,13 @@ async function openDirectoryInternal(){
   hide('view-trips');
   hide('view-trip');
   show('view-directory');
+  // Only the global admin actually lands here, but defensive double-check.
+  if(state.profile && state.profile.is_global_admin){
+    show('dir-fab');
+    $('dir-fab').onclick = openAddPersonDirectoryOnly;
+  }else{
+    hide('dir-fab');
+  }
   $('directory-content').innerHTML =
     '<div class="center-spin"><div class="spinner"></div></div>';
   try{
