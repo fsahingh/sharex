@@ -342,6 +342,16 @@
     border:1px solid var(--c-border);border-radius:var(--r-sm);
     font-size:13px;font-weight:600;color:var(--c-text);
     font-family:inherit;cursor:pointer;}
+  /* Faded look on a button that's enabled but blocked by some condition. */
+  .disabled-look{opacity:0.4;}
+  .disabled-look:active{transform:none;}
+
+  /* Inline trip links inside the "can't delete" explainer. */
+  .dlb-link{display:block;padding:9px 12px;background:var(--c-tint-bg);color:var(--c-tint);
+    border-radius:var(--r-sm);text-decoration:none;font-size:13.5px;font-weight:600;
+    margin-bottom:6px;}
+  .dlb-link:active{opacity:0.7;}
+
   .ts-singleton.danger{color:var(--c-danger);background:rgba(255,59,48,0.08);}
   .ts-singleton:active{transform:scale(0.99);}
   .ts-section{font-size:11px;font-weight:600;color:var(--c-text-3);
@@ -911,7 +921,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.6';
+var APP_VERSION = 'V2-4.7';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2694,12 +2704,25 @@ async function openEditPerson(dirId){
       $('ep-trips-list').innerHTML = th;
       show('ep-trips-section');
     }
-    // Delete button: admin, not self, no active trips, no expense history
-    var canDelete = state.profile && state.profile.is_global_admin
-                 && !(p.profile_id && p.profile_id === state.session.user.id)
-                 && (p.unsettled_trip_count === 0)
-                 && (p.expense_count === 0);
-    $('ep-delete').hidden = !canDelete;
+    // Delete button: always visible to global admin; but the actual
+    // deletion is blocked if the person is in an active trip or has any
+    // expense history. When blocked, the trash icon stays but is faded;
+    // tapping it explains what to do instead.
+    var isGlobal = !!(state.profile && state.profile.is_global_admin);
+    var isSelf = (p.profile_id && state.session && p.profile_id === state.session.user.id);
+    var canActuallyDelete = isGlobal && !isSelf
+                         && (p.unsettled_trip_count === 0)
+                         && (p.expense_count === 0);
+    var btn = $('ep-delete');
+    btn.hidden = !isGlobal;
+    // Faded look + blocker explainer when not deletable.
+    if(isGlobal && !canActuallyDelete){
+      btn.classList.add('disabled-look');
+      btn.dataset.blocked = '1';
+    }else{
+      btn.classList.remove('disabled-look');
+      btn.dataset.blocked = '';
+    }
   }catch(err){
     closeModal('modal-edit-person');
     toast(err.message||'Could not load person', true);
@@ -2762,6 +2785,12 @@ async function deleteEditPerson(){
   var p = state.editingPerson;
   var nm = (p.first_name||'') + ' ' + (p.last_name||'');
   nm = nm.trim() || p.email || 'this person';
+  // Trash button is faded when this person can't be deleted yet. Tapping
+  // it should explain the blocker instead of starting a delete confirm.
+  if($('ep-delete').dataset.blocked === '1'){
+    showDeleteBlockerModal(p, nm);
+    return;
+  }
   if(!await alertModal('Delete '+nm+' from the directory? This cannot be undone.', { confirm:true, danger:true, confirmLabel:'Delete' })) return;
   try{
     var res = await sb.rpc('delete_directory_person',{ p_dir:p.directory_id });
@@ -2773,6 +2802,70 @@ async function deleteEditPerson(){
   }catch(err){
     toast(err.message||'Could not delete', true);
   }
+}
+
+// Show a short modal explaining why the person can't be deleted yet
+// and link to the trips the admin needs to deal with first.
+function showDeleteBlockerModal(p, displayName){
+  var active = p.active_trips || [];
+  var expenseTrips = (p.expense_trips || []).filter(function(t){
+    // Already shown in "active" if unsettled — skip duplicates there.
+    return !active.some(function(a){ return a.trip_id === t.trip_id; });
+  });
+  // Pure-self check: if it's the global admin themselves.
+  var isSelf = (p.profile_id && state.session && p.profile_id === state.session.user.id);
+
+  var body = '';
+  if(isSelf){
+    body += '<div style="font-size:14px;line-height:1.5;color:var(--c-text);margin-bottom:6px;">'+
+      'You can\'t delete your own directory entry. Sign out instead if you want to leave.</div>';
+  }else{
+    body += '<div style="font-size:14px;line-height:1.5;color:var(--c-text);margin-bottom:10px;">'+
+      esc(displayName)+' can\'t be deleted yet because of the following.</div>';
+    if(active.length > 0){
+      body += '<div style="font-size:12px;font-weight:600;color:var(--c-text-2);text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px;">Currently a member of</div>';
+      body += '<div style="margin-bottom:14px;">';
+      active.forEach(function(t){
+        body += '<a href="#" class="dlb-link" data-tid="'+esc(t.trip_id)+'">'+esc(t.name)+'</a>';
+      });
+      body += '<div style="font-size:12.5px;color:var(--c-text-2);margin-top:8px;line-height:1.45;">Remove them from these trips first (People tab → trash icon).</div>';
+      body += '</div>';
+    }
+    if(expenseTrips.length > 0){
+      body += '<div style="font-size:12px;font-weight:600;color:var(--c-text-2);text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px;">Has expense history in</div>';
+      body += '<div>';
+      expenseTrips.forEach(function(t){
+        body += '<a href="#" class="dlb-link" data-tid="'+esc(t.trip_id)+'">'+esc(t.name)+'</a>';
+      });
+      body += '<div style="font-size:12.5px;color:var(--c-text-2);margin-top:8px;line-height:1.45;">Past expenses keep them in the directory so records stay intact. You can\'t delete people who have ever been part of a settled trip.</div>';
+      body += '</div>';
+    }
+  }
+  $('dlg-title').textContent = 'Can\'t delete';
+  $('dlg-body').innerHTML = body;
+  var okBtn = $('dlg-ok');
+  var cxBtn = $('dlg-cancel');
+  okBtn.textContent = 'Got it';
+  okBtn.style.background = ''; okBtn.style.color = '';
+  cxBtn.hidden = true;
+  function cleanup(){
+    okBtn.onclick = null;
+    $('modal-dialog').querySelector('.modal-backdrop').onclick = null;
+    closeModal('modal-dialog');
+  }
+  okBtn.onclick = cleanup;
+  $('modal-dialog').querySelector('.modal-backdrop').onclick = cleanup;
+  // Trip links — close all modals, then open the trip detail.
+  $('dlg-body').onclick = function(ev){
+    var a = ev.target.closest('.dlb-link');
+    if(!a) return;
+    ev.preventDefault();
+    var tid = a.dataset.tid;
+    cleanup();
+    closeModal('modal-edit-person');
+    openTrip(tid);
+  };
+  openModal('modal-dialog');
 }
 
 // Send a magic-link sign-in invite to the person being edited. Uses the
