@@ -909,7 +909,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.4';
+var APP_VERSION = 'V2-4.5';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2124,18 +2124,17 @@ function renderSettlementTab(){
     : (t.settled ? 'Settled' : 'Active');
   var lockAttr = (t.is_admin && total>0) ? ' id="settle-toggle" role="button"' : '';
 
-  // Center column: lock alone when active, lock + share when settled.
+  // Center column: lock alone when active, lock + share when settled
+  // AND the caller is admin. Non-admins on settled trips just see the lock.
   var centerHtml;
-  if(t.settled){
-    var shareAttr = t.is_admin ? ' id="settle-share" role="button"' : '';
-    var shareCls = 'ss-lock share' + (t.is_admin ? ' tappable' : '');
+  if(t.settled && t.is_admin){
     centerHtml =
       '<div class="ss-center-row">'+
         '<div class="ss-lock '+lockState+(t.is_admin&&total>0?' tappable':'')+'"'+lockAttr+'>'+
           '<div class="ss-lock-icon">'+lockSvg+'</div>'+
           '<div class="ss-lock-hint">'+esc(lockHint)+'</div>'+
         '</div>'+
-        '<div class="'+shareCls+'"'+shareAttr+'>'+
+        '<div class="ss-lock share tappable" id="settle-share" role="button">'+
           '<div class="ss-lock-icon">'+
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>'+
           '</div>'+
@@ -2234,6 +2233,27 @@ function renderSettlementTab(){
 }
 
 async function doSettle(){
+  // Pre-check: are there pending requests blocking the settle? If so we
+  // show a friendly modal that lets the admin jump straight to the
+  // notifications panel rather than learning about the block from a
+  // raw error toast.
+  try{
+    var chk = await sb.rpc('count_pending_trip_requests', { p_trip: state.trip.trip_id });
+    if(!chk.error && chk.data && chk.data.total > 0){
+      var d = chk.data;
+      var parts = [];
+      if(d.change_requests > 0) parts.push(d.change_requests+' expense change request'+(d.change_requests===1?'':'s'));
+      if(d.member_requests > 0) parts.push(d.member_requests+' member request'+(d.member_requests===1?'':'s'));
+      var msg = 'This trip has '+parts.join(' and ')+' waiting for a decision. '+
+        'Resolve them before settling so everyone\'s view stays consistent.';
+      var goToNotifs = await showPendingBlockModal(msg);
+      if(goToNotifs){
+        openNotifs();
+      }
+      return;
+    }
+  }catch(e){ /* if the precheck fails, let the actual settle call surface a real error */ }
+
   if(!await alertModal('Settle this trip? This will lock all expenses and member changes.', { confirm:true, confirmLabel:'Settle' })) return;
   overlay('Settling…');
   try{
@@ -2246,8 +2266,37 @@ async function doSettle(){
     toast('Trip settled');
   }catch(err){
     overlayOff();
+    // If somehow the precheck missed something and the backend blocks too,
+    // fall back to surfacing the message.
     toast(err.message||'Could not settle',true);
   }
+}
+
+// Custom dialog used when settle is blocked by pending requests.
+// Returns Promise<true> if user wants to jump to notifications,
+// Promise<false> if they want to dismiss.
+function showPendingBlockModal(message){
+  return new Promise(function(resolve){
+    $('dlg-title').textContent = 'Pending requests';
+    $('dlg-body').innerHTML = '<div style="font-size:14px;line-height:1.45;color:var(--c-text);">'+esc(message)+'</div>';
+    var okBtn = $('dlg-ok');
+    var cxBtn = $('dlg-cancel');
+    okBtn.textContent = 'Take me to requests';
+    cxBtn.textContent = 'Cancel';
+    cxBtn.hidden = false;
+    okBtn.style.background = ''; okBtn.style.color = '';
+    function cleanup(answer){
+      okBtn.onclick = null;
+      cxBtn.onclick = null;
+      $('modal-dialog').querySelector('.modal-backdrop').onclick = null;
+      closeModal('modal-dialog');
+      resolve(answer);
+    }
+    okBtn.onclick = function(){ cleanup(true); };
+    cxBtn.onclick = function(){ cleanup(false); };
+    $('modal-dialog').querySelector('.modal-backdrop').onclick = function(){ cleanup(false); };
+    openModal('modal-dialog');
+  });
 }
 async function doUnsettle(){
   if(!await alertModal('Reopen this trip? Expenses and members can be changed again.', { confirm:true, confirmLabel:'Reopen' })) return;
