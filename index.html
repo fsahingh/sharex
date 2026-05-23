@@ -936,7 +936,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-4.9';
+var APP_VERSION = 'V2-5.0';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2745,6 +2745,14 @@ function renderDirectory(){
   var isAdmin = !!(state.profile && state.profile.is_global_admin);
   var h = '<div class="tab-count">'+list.length+' '+
     (list.length===1?'person':'people')+'</div>';
+  if(isAdmin){
+    h += '<button id="dir-invite-btn" class="btn btn-secondary" '+
+      'style="margin-top:0;margin-bottom:12px;width:100%;display:flex;'+
+      'align-items:center;justify-content:center;gap:8px;font-size:13px;">'+
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>'+
+      '<span>Send sign-in invites</span>'+
+      '</button>';
+  }
   list.forEach(function(p){
     var nm = p.display_name || p.email || 'Unnamed';
     var initial = ((p.first_name||p.email||'?')[0]||'?').toUpperCase();
@@ -2765,6 +2773,7 @@ function renderDirectory(){
   el.innerHTML = h;
   // Only the global admin can open the editor.
   el.onclick = function(ev){
+    if(ev.target.closest('#dir-invite-btn')){ openSendInvitesDirectory(); return; }
     var row = ev.target.closest('[data-dir]');
     if(!row) return;
     if(isAdmin){
@@ -3001,21 +3010,46 @@ function showDeleteBlockerModal(p, displayName){
 // who already have an account but lost their email/link.
 function openSendInvites(){
   if(!state.trip) return;
+  state.inviteSource = 'trip';
+  openModal('modal-invite');
+  renderInviteList();
+}
+
+// Same modal, but the list is the whole directory. Only the global admin
+// gets here.
+function openSendInvitesDirectory(){
+  state.inviteSource = 'directory';
   openModal('modal-invite');
   renderInviteList();
 }
 
 function renderInviteList(){
-  var t = state.trip;
-  if(!t || !t.members){ return; }
-  // Caller's directory id — skip showing themselves in the list.
-  var myDirId = t.my_directory_id || null;
-  var members = (t.members||[]).filter(function(m){
-    return m.directory_id !== myDirId && !m.is_me;
-  });
-  // Sort: members with emails first (alphabetical), then those without.
-  // We no longer split "has account" vs "no account" — invites work the
-  // same for both, and the user said the badge is noise.
+  // Build the candidate list based on which screen opened the modal.
+  var members;
+  if(state.inviteSource === 'directory'){
+    // From the directory view: every directory row except the caller.
+    var myUid = state.session && state.session.user && state.session.user.id;
+    members = (state.directory || [])
+      .filter(function(d){ return d.profile_id !== myUid; })
+      .map(function(d){
+        return {
+          directory_id: d.directory_id,
+          email: d.email,
+          first_name: d.first_name,
+          last_name: d.last_name,
+          // display_name fallback so the existing render code can read it.
+          display_name: (((d.first_name||'')+' '+(d.last_name||'')).trim() || d.email || 'Member')
+        };
+      });
+  }else{
+    var t = state.trip;
+    if(!t || !t.members){ return; }
+    var myDirId = t.my_directory_id || null;
+    members = (t.members||[]).filter(function(m){
+      return m.directory_id !== myDirId && !m.is_me;
+    });
+  }
+  // Sort: emails-first, then alphabetical.
   members.sort(function(a,b){
     var aHas = !!a.email, bHas = !!b.email;
     if(aHas !== bHas) return aHas ? -1 : 1;
