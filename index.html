@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-5.4">
+<meta name="app-version" content="V2-5.5">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1004,7 +1004,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.4';
+var APP_VERSION = 'V2-5.5';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2411,9 +2411,9 @@ function renderSettlementTab(){
   if(!t || !s){ return; }
   var balances = s.balances || [];
   var transfers = s.transfers || [];
-  var total = Number(s.total_cost)||0;
-  var memberCount = (t.members||[]).length;
-  var perPerson = memberCount>0 ? total/memberCount : 0;
+  var total = Number(s.total)||0;
+  var memberCount = Number(s.member_count) || (t.members||[]).length;
+  var perPerson = Number(s.per_person) || (memberCount>0 ? total/memberCount : 0);
   var myDirId = t.my_directory_id;
   var myBal = balances.find(function(b){ return b.directory_id===myDirId; });
   var callerAdmin = !!s.caller_is_admin;
