@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-5.3">
+<meta name="app-version" content="V2-5.4">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -373,7 +373,21 @@
   .bd-total-lbl{font-size:13px;}
   .bd-total-val{font-size:16px;}
 
-  /* Tappable look on the Settlement summary cards. */
+  /* Expense/Pre-payment switch inside the Add Expense modal. */
+  .kind-tabs{display:flex;gap:4px;background:var(--c-bg);padding:4px;
+    border-radius:10px;margin-bottom:18px;}
+  .kind-tab{flex:1;padding:9px 8px;border:none;background:transparent;
+    border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;
+    color:var(--c-text-2);cursor:pointer;transition:all .15s ease;}
+  .kind-tab.active{background:var(--c-surface);color:var(--c-text);
+    box-shadow:0 1px 2px rgba(0,0,0,0.05);}
+
+  /* Prepayment badge shown on the left side of an expense row. */
+  .pre-badge{display:inline-flex;align-items:center;justify-content:center;
+    font-size:9px;font-weight:700;letter-spacing:.5px;
+    background:rgba(10,132,255,0.12);color:var(--c-tint);
+    padding:3px 7px;border-radius:6px;text-transform:uppercase;
+    flex-shrink:0;}
   .ss-cell.tappable{cursor:pointer;}
   .ss-cell.tappable:active{transform:scale(0.98);}
   .my-card.tappable{cursor:pointer;}
@@ -881,18 +895,34 @@
     <div class="modal-handle"></div>
     <div class="modal-title" id="ex-title">Add Expense</div>
     <div class="modal-body">
-      <label for="ex-desc">Description</label>
-      <input type="text" id="ex-desc" class="field" placeholder="e.g. Dinner" maxlength="80">
+      <!-- Type tabs — only visible to trip admins when adding (not editing).
+           Members never see these; they always add a plain expense. -->
+      <div id="ex-kind-tabs" class="kind-tabs" hidden>
+        <button type="button" class="kind-tab active" data-kind="expense">Expense</button>
+        <button type="button" class="kind-tab" data-kind="prepayment">Pre-payment</button>
+      </div>
+      <div id="ex-desc-wrap">
+        <label for="ex-desc">Description</label>
+        <input type="text" id="ex-desc" class="field" placeholder="e.g. Dinner" maxlength="80">
+      </div>
       <label for="ex-amount">Amount ($)</label>
       <input type="number" id="ex-amount" class="field" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00">
-      <label for="ex-paid-by">Paid by</label>
+      <label for="ex-paid-by" id="ex-paid-by-label">Paid by</label>
       <select id="ex-paid-by" class="field"></select>
-      <label style="margin-top:14px;">Split between</label>
-      <div class="ex-split-mode">
-        <label class="ex-radio"><input type="radio" name="ex-split" value="everyone" checked> Everyone</label>
-        <label class="ex-radio"><input type="radio" name="ex-split" value="custom"> Custom</label>
+      <!-- Pre-payment only: who received the money. -->
+      <div id="ex-paid-to-wrap" hidden>
+        <label for="ex-paid-to" style="margin-top:14px;">Paid to</label>
+        <select id="ex-paid-to" class="field"></select>
       </div>
-      <div id="ex-split-list" hidden></div>
+      <!-- Expense only: split selection. Hidden for prepayments. -->
+      <div id="ex-split-wrap">
+        <label style="margin-top:14px;">Split between</label>
+        <div class="ex-split-mode">
+          <label class="ex-radio"><input type="radio" name="ex-split" value="everyone" checked> Everyone</label>
+          <label class="ex-radio"><input type="radio" name="ex-split" value="custom"> Custom</label>
+        </div>
+        <div id="ex-split-list" hidden></div>
+      </div>
       <div class="msg" id="ex-msg"></div>
     </div>
     <div class="modal-actions">
@@ -974,7 +1004,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.3';
+var APP_VERSION = 'V2-5.4';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1983,19 +2013,25 @@ function renderExpensesTab(){
 
   var h = '<div class="tab-count">'+list.length+' '+(list.length===1?'expense':'expenses')+'</div>';
   list.forEach(function(e){
+    var isPre = (e.kind === 'prepayment');
     var splitIds = e.split_ids || [];
-    var perPerson = splitIds.length ? (Number(e.amount)/splitIds.length) : 0;
+    var perPerson = (!isPre && splitIds.length) ? (Number(e.amount)/splitIds.length) : 0;
     var open = (state.expandedExpense === e.expense_id);
     var pending = !!e.has_pending_request;
-    h += '<div class="exp-card'+(pending?' has-pending':'')+'">'+
+    h += '<div class="exp-card'+(pending?' has-pending':'')+(isPre?' is-pre':'')+'">'+
       '<button class="exp-row" data-toggle="'+e.expense_id+'">'+
+        (isPre ? '<span class="pre-badge">Pre</span>' : '')+
         '<div class="exp-left">'+
           '<div class="exp-desc-row">'+
             '<span class="exp-desc">'+esc(e.description)+'</span>'+
             (pending ? '<span class="pending-badge" title="A change request is awaiting review">Pending request</span>' : '')+
           '</div>'+
-          '<div class="exp-meta">Paid by '+esc(e.paid_by_name||'?')+' · '+
-            splitIds.length+' '+(splitIds.length===1?'share':'shares')+'</div>'+
+          '<div class="exp-meta">'+
+            (isPre
+              ? 'From '+esc(e.paid_by_name||'?')+' to '+esc(e.paid_to_name||'?')
+              : 'Paid by '+esc(e.paid_by_name||'?')+' · '+
+                splitIds.length+' '+(splitIds.length===1?'share':'shares'))+
+          '</div>'+
         '</div>'+
         '<span class="exp-amount">'+money(Number(e.amount))+'</span>'+
         '<span class="exp-chevron'+(open?' open':'')+'">'+
@@ -2003,6 +2039,16 @@ function renderExpensesTab(){
         '</span>'+
       '</button>';
     if(open){
+      if(isPre){
+        // Prepayments have no split panel — just an admin action row.
+        h += '<div class="exp-split-panel">';
+        if(!t.settled && t.is_admin){
+          h += '<div style="display:flex;gap:8px;margin-top:4px;">'+
+            '<button class="btn btn-secondary" data-edit="'+e.expense_id+'" style="margin-top:0;">Edit</button>'+
+            '</div>';
+        }
+        h += '</div>';
+      }else{
       h += '<div class="exp-split-panel">'+
         '<div class="exp-split-head-row">'+
           '<span class="exp-split-head">Split between '+splitIds.length+'</span>'+
@@ -2015,14 +2061,10 @@ function renderExpensesTab(){
       h += '</div>';
       if(!t.settled){
         if(t.is_admin){
-          // Admin can still edit directly even when a request is pending —
-          // they may want to resolve it manually. Notification panel has
-          // Approve/Reject; this is the manual override.
           h += '<div style="display:flex;gap:8px;margin-top:12px;">'+
             '<button class="btn btn-secondary" data-edit="'+e.expense_id+'" style="margin-top:0;">Edit</button>'+
             '</div>';
         }else if(pending){
-          // Non-admin sees an explanatory note instead of action buttons.
           h += '<div class="pending-note">A change request is awaiting review for this expense. '+
             'New requests are paused until it\'s decided.</div>';
         }else{
@@ -2033,6 +2075,7 @@ function renderExpensesTab(){
         }
       }
       h += '</div>';
+      }
     }
     h += '</div>';
   });
@@ -2072,6 +2115,7 @@ async function doRequestDelete(expenseId){
 state.expenseEditingId = null;
 state.expenseOriginal  = null;
 state.expenseMode = 'admin';   // 'admin' (direct save), 'request-edit' (submits change request)
+state.expenseKind = 'expense'; // 'expense' or 'prepayment'
 
 function openExpenseModal(expenseId, mode){
   var t = state.trip;
@@ -2079,6 +2123,7 @@ function openExpenseModal(expenseId, mode){
   state.expenseEditingId = expenseId || null;
   state.expenseMode = mode || (t.is_admin ? 'admin' : 'admin');
   state.expenseOriginal  = null;
+  state.expenseKind = 'expense';
 
   // Populate Paid-by dropdown with trip members
   var sel = $('ex-paid-by');
@@ -2089,6 +2134,17 @@ function openExpenseModal(expenseId, mode){
     var o=document.createElement('option');
     o.value=m.directory_id; o.textContent=displayName(m);
     sel.appendChild(o);
+  });
+
+  // Populate Paid-to dropdown (prepayment only). Same members list.
+  var selTo = $('ex-paid-to');
+  selTo.innerHTML='';
+  var phTo=document.createElement('option');
+  phTo.value=''; phTo.textContent='— Select who received —'; selTo.appendChild(phTo);
+  (t.members||[]).forEach(function(m){
+    var o=document.createElement('option');
+    o.value=m.directory_id; o.textContent=displayName(m);
+    selTo.appendChild(o);
   });
 
   // Build the per-person split list (custom mode)
@@ -2106,46 +2162,84 @@ function openExpenseModal(expenseId, mode){
   // Reset fields
   $('ex-msg').className='msg';
   document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
+  $('ex-paid-to').value = '';
 
   if(expenseId){
     // EDIT mode — fill from existing expense
     var exp = (state.expenses||[]).find(function(e){ return e.expense_id===expenseId; });
     if(!exp){ toast('Expense not found',true); return; }
     var isRequest = (state.expenseMode === 'request-edit');
-    $('ex-title').textContent = isRequest ? 'Request Change' : 'Edit Expense';
+    state.expenseKind = exp.kind || 'expense';
+    var isPre = (state.expenseKind === 'prepayment');
+    $('ex-title').textContent = isRequest
+      ? 'Request Change'
+      : (isPre ? 'Edit Pre-payment' : 'Edit Expense');
+    // Kind tabs are not visible when editing — kind is fixed.
+    hide('ex-kind-tabs');
     $('ex-desc').value   = exp.description || '';
     $('ex-amount').value = String(exp.amount);
     $('ex-paid-by').value= exp.paid_by;
-    // Determine if split is "everyone" or custom
-    var memberIds = (t.members||[]).map(function(m){ return m.directory_id; });
-    var splitIds = (exp.split_ids||[]).map(String);
-    var isEveryone = (splitIds.length === memberIds.length) &&
-                     memberIds.every(function(id){ return splitIds.indexOf(id)>=0; });
-    if(isEveryone){
-      document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
-      splitListEl.hidden = true;
-    }else{
-      document.querySelector('input[name="ex-split"][value="custom"]').checked=true;
-      splitListEl.hidden = false;
-      document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
-        cb.checked = splitIds.indexOf(cb.dataset.mid) >= 0;
-      });
+    if(isPre){
+      $('ex-paid-to').value = exp.paid_to || '';
     }
-    // Delete shortcut: only admin sees it (non-admin uses Request delete on the card)
+    applyKindLayout(state.expenseKind);
+    // Split section only for expenses; prepayments don't have one.
+    if(!isPre){
+      var memberIds = (t.members||[]).map(function(m){ return m.directory_id; });
+      var splitIds = (exp.split_ids||[]).map(String);
+      var isEveryone = (splitIds.length === memberIds.length) &&
+                       memberIds.every(function(id){ return splitIds.indexOf(id)>=0; });
+      if(isEveryone){
+        document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
+        splitListEl.hidden = true;
+      }else{
+        document.querySelector('input[name="ex-split"][value="custom"]').checked=true;
+        splitListEl.hidden = false;
+        document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
+          cb.checked = splitIds.indexOf(cb.dataset.mid) >= 0;
+        });
+      }
+    }
     $('ex-delete').hidden = !(t.is_admin) || isRequest;
     state.expenseOriginal = JSON.stringify(readExpenseForm());
-    // Save starts disabled — only enabled when something changes
     $('ex-save').textContent = isRequest ? 'Submit request' : 'Apply Changes';
     $('ex-save').disabled = true;
   }else{
-    // ADD mode (always direct — every trip member can add expenses)
+    // ADD mode
     $('ex-title').textContent = 'Add Expense';
     $('ex-desc').value=''; $('ex-amount').value=''; $('ex-paid-by').value='';
     $('ex-delete').hidden = true;
     $('ex-save').textContent = 'Save';
     $('ex-save').disabled = false;
+    // Kind tabs visible only to admins on add. Members never see prepayment.
+    if(t.is_admin){
+      show('ex-kind-tabs');
+      // Reset tab visuals.
+      document.querySelectorAll('#ex-kind-tabs .kind-tab').forEach(function(tab){
+        tab.classList.toggle('active', tab.dataset.kind === 'expense');
+      });
+    }else{
+      hide('ex-kind-tabs');
+    }
+    applyKindLayout('expense');
   }
   openModal('modal-expense');
+}
+
+// Toggle visibility of description / paid-to / split sections based on
+// the currently selected kind. Called both when the user taps a tab and
+// when the modal first opens.
+function applyKindLayout(kind){
+  state.expenseKind = kind;
+  var isPre = (kind === 'prepayment');
+  // Description: hidden + not required for prepayments (auto-filled).
+  $('ex-desc-wrap').hidden = isPre;
+  // Paid-by label changes wording slightly.
+  $('ex-paid-by-label').textContent = isPre ? 'From (who paid)' : 'Paid by';
+  // Paid-to: prepayments only.
+  $('ex-paid-to-wrap').hidden = !isPre;
+  // Split section: expenses only.
+  $('ex-split-wrap').hidden = isPre;
 }
 
 // Recomputes whether the form differs from the original; toggles Save.
@@ -2165,9 +2259,11 @@ function readExpenseForm(){
     });
   }
   return {
+    kind:        state.expenseKind || 'expense',
     description: $('ex-desc').value.trim(),
     amount:      $('ex-amount').value,
     paid_by:     $('ex-paid-by').value,
+    paid_to:     $('ex-paid-to').value,
     split_mode:  splitMode,
     split_ids:   splitIds
   };
@@ -2176,16 +2272,54 @@ function readExpenseForm(){
 async function saveExpense(){
   var f = readExpenseForm();
   function setMsg(text){ $('ex-msg').className='msg show err'; $('ex-msg').textContent=text; }
-  if(!f.description){ setMsg('Description is required.'); return; }
   var amt = Number(f.amount);
   if(!isFinite(amt) || amt <= 0){ setMsg('Enter a valid amount.'); return; }
+  var btn=$('ex-save');
+  var isRequest = (state.expenseMode === 'request-edit');
+
+  // ---- PRE-PAYMENT path ----
+  if(f.kind === 'prepayment'){
+    if(!f.paid_by){ setMsg('Choose who paid.'); return; }
+    if(!f.paid_to){ setMsg('Choose who received the money.'); return; }
+    if(f.paid_by === f.paid_to){ setMsg('Giver and receiver must differ.'); return; }
+    btn.disabled = true;
+    btn.textContent = state.expenseEditingId ? 'Saving…' : 'Saving…';
+    try{
+      if(state.expenseEditingId){
+        var resu = await sb.rpc('update_prepayment', {
+          p_expense: state.expenseEditingId,
+          p_paid_by: f.paid_by,
+          p_paid_to: f.paid_to,
+          p_amount:  amt
+        });
+        if(resu.error) throw resu.error;
+      }else{
+        var resa = await sb.rpc('add_prepayment', {
+          p_trip:    state.trip.trip_id,
+          p_paid_by: f.paid_by,
+          p_paid_to: f.paid_to,
+          p_amount:  amt
+        });
+        if(resa.error) throw resa.error;
+      }
+      closeModal('modal-expense');
+      toast('Saved');
+      state.settlementLoadedFor = null;
+      await loadExpenses();
+    }catch(err){
+      setMsg(err.message||'Could not save.');
+    }
+    btn.disabled = false; btn.textContent = 'Save';
+    return;
+  }
+
+  // ---- EXPENSE path (original) ----
+  if(!f.description){ setMsg('Description is required.'); return; }
   if(!f.paid_by){ setMsg('Choose who paid.'); return; }
   if(f.split_mode==='custom' && (!f.split_ids || f.split_ids.length===0)){
     setMsg('Select at least one person for the split.'); return;
   }
-  var btn=$('ex-save');
   btn.disabled=true;
-  var isRequest = (state.expenseMode === 'request-edit');
   btn.textContent = isRequest ? 'Submitting…' : 'Saving…';
   try{
     if(isRequest && state.expenseEditingId){
@@ -3359,6 +3493,8 @@ async function openBreakdown(kind){
         total += Number(r.my_share)||0;
       }
       h += '<div class="bd-row">'+
+        (kind === 'paid' && r.kind === 'prepayment'
+          ? '<span class="pre-badge" style="margin-right:4px;">Pre</span>' : '')+
         '<div class="bd-info">'+
           '<div class="bd-desc">'+esc(r.description||'(no description)')+'</div>'+
           (dt ? '<div class="bd-date">'+esc(dt)+'</div>' : '')+
@@ -4032,8 +4168,19 @@ $('ep-delete').onclick=deleteEditPerson;
 $('ex-cancel').onclick = function(){ closeModal('modal-expense'); };
 $('ex-save').onclick   = saveExpense;
 $('ex-delete').onclick = deleteExpense;
+// Kind tabs (Expense / Pre-payment) — only visible to admins in add mode.
+document.querySelectorAll('#ex-kind-tabs .kind-tab').forEach(function(tab){
+  tab.onclick = function(){
+    var k = tab.dataset.kind;
+    document.querySelectorAll('#ex-kind-tabs .kind-tab').forEach(function(t){
+      t.classList.toggle('active', t === tab);
+    });
+    applyKindLayout(k);
+    $('ex-msg').className='msg'; // clear any prior error
+  };
+});
 // In edit mode, the Save button stays disabled until the form really changes.
-['ex-desc','ex-amount','ex-paid-by'].forEach(function(id){
+['ex-desc','ex-amount','ex-paid-by','ex-paid-to'].forEach(function(id){
   $(id).addEventListener('input', checkExpenseChanged);
   $(id).addEventListener('change', checkExpenseChanged);
 });
