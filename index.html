@@ -356,6 +356,28 @@
   .disabled-look{opacity:0.4;}
   .disabled-look:active{transform:none;}
 
+  /* ---- BREAKDOWN MODAL (per-user expense list on Settlement cards) ---- */
+  .bd-row{display:flex;align-items:center;gap:12px;padding:11px 12px;
+    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:6px;
+    min-width:0;}
+  .bd-info{flex:1;min-width:0;}
+  .bd-desc{font-size:14px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .bd-date{font-size:11px;color:var(--c-text-3);margin-top:1px;}
+  .bd-amount{font-size:14px;font-weight:700;flex-shrink:0;text-align:right;}
+  .bd-sub{font-size:11px;color:var(--c-text-2);font-weight:500;margin-top:1px;}
+  .bd-total{display:flex;justify-content:space-between;align-items:center;
+    padding:14px 12px;margin-top:6px;background:var(--c-tint-bg);
+    border-radius:var(--r-sm);font-weight:700;color:var(--c-tint);}
+  .bd-total-lbl{font-size:13px;}
+  .bd-total-val{font-size:16px;}
+
+  /* Tappable look on the Settlement summary cards. */
+  .ss-cell.tappable{cursor:pointer;}
+  .ss-cell.tappable:active{transform:scale(0.98);}
+  .my-card.tappable{cursor:pointer;}
+  .my-card.tappable:active{transform:scale(0.98);}
+
   /* Inline trip links inside the "can't delete" explainer. */
   .dlb-link{display:block;padding:9px 12px;background:var(--c-tint-bg);color:var(--c-tint);
     border-radius:var(--r-sm);text-decoration:none;font-size:13.5px;font-weight:600;
@@ -761,6 +783,21 @@
   </div>
 </div>
 
+<!-- ======================= SETTLEMENT BREAKDOWN MODAL ======================= -->
+<!-- Used to show the calling user's "what I paid" or "my share" detail
+     when they tap the corresponding card on the Settlement tab. -->
+<div class="modal" id="modal-breakdown" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-width:420px;">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="bd-title">Breakdown</div>
+    <div class="modal-body" id="bd-body" style="min-height:120px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="bd-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= SHARE SETTLEMENT MODAL ======================= -->
 <!-- Used on settled trips. Admin picks recipients and the app sends each
      of them a personalized email summary of their balance/transfers. -->
@@ -936,7 +973,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.0';
+var APP_VERSION = 'V2-5.1';
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2236,7 +2273,8 @@ function renderSettlementTab(){
       '<div class="ss-cell"><div class="ss-lbl">Total cost</div>'+
         '<div class="ss-val">'+money(total)+'</div></div>'+
       centerHtml+
-      '<div class="ss-cell"><div class="ss-lbl">Per person</div>'+
+      '<div class="ss-cell tappable" id="ss-perperson" role="button">'+
+        '<div class="ss-lbl">Per person</div>'+
         '<div class="ss-val">'+money(perPerson)+'</div></div>'+
     '</div>'+
     '</div>';
@@ -2248,7 +2286,8 @@ function renderSettlementTab(){
     var nlbl = (Math.abs(n) < 0.005) ? 'You\'re even' :
                (n>0 ? 'You\'re owed' : 'You owe');
     h += '<div class="my-row">'+
-      '<div class="my-card"><div class="my-lbl">You paid</div>'+
+      '<div class="my-card tappable" id="ss-youpaid" role="button">'+
+        '<div class="my-lbl">You paid</div>'+
         '<div class="my-amt">'+money(Number(myBal.paid)||0)+'</div></div>'+
       '<div class="my-card '+ncls+'"><div class="my-lbl">'+nlbl+'</div>'+
         '<div class="my-amt">'+money(Math.abs(n))+'</div></div>'+
@@ -2312,6 +2351,10 @@ function renderSettlementTab(){
   if(toggle) toggle.onclick = t.settled ? doUnsettle : doSettle;
   var shareBtn = $('settle-share');
   if(shareBtn) shareBtn.onclick = openShareSettlement;
+  var ppBtn = $('ss-perperson');
+  if(ppBtn) ppBtn.onclick = function(){ openBreakdown('shared'); };
+  var ypBtn = $('ss-youpaid');
+  if(ypBtn) ypBtn.onclick = function(){ openBreakdown('paid'); };
 }
 
 async function doSettle(){
@@ -3218,6 +3261,76 @@ function updateShareSendLabel(){
   btn.textContent = n === 0 ? 'Share' : ('Share ('+n+')');
 }
 
+// ============================================================
+//  SETTLEMENT BREAKDOWN (per-user expense list popup)
+// ============================================================
+// Tapping the "You paid" card opens kind='paid'; tapping "Per person"
+// opens kind='shared'. Both pull from the same RPC and just pick which
+// list to render.
+async function openBreakdown(kind){
+  if(!state.trip) return;
+  openModal('modal-breakdown');
+  $('bd-title').textContent = kind === 'paid' ? 'You paid' : 'Your share';
+  $('bd-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_my_settlement_breakdown', { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    var data = res.data || { paid:[], shared:[] };
+    var rows = (kind === 'paid' ? data.paid : data.shared) || [];
+    if(rows.length === 0){
+      $('bd-body').innerHTML =
+        '<div class="empty" style="padding:30px 0;">'+
+        '<div class="empty-sub">'+
+        (kind === 'paid' ? 'You haven\'t paid for any expenses on this trip.'
+                         : 'You\'re not included in any expenses on this trip.')+
+        '</div></div>';
+      return;
+    }
+    var h = '';
+    var total = 0;
+    rows.forEach(function(r){
+      var dt = formatBreakdownDate(r.created_at);
+      var primary, subtext;
+      if(kind === 'paid'){
+        primary = money(Number(r.amount)||0);
+        subtext = '';
+        total += Number(r.amount)||0;
+      }else{
+        primary = money(Number(r.my_share)||0);
+        subtext = 'of '+money(Number(r.amount)||0);
+        total += Number(r.my_share)||0;
+      }
+      h += '<div class="bd-row">'+
+        '<div class="bd-info">'+
+          '<div class="bd-desc">'+esc(r.description||'(no description)')+'</div>'+
+          (dt ? '<div class="bd-date">'+esc(dt)+'</div>' : '')+
+        '</div>'+
+        '<div class="bd-amount">'+primary+
+          (subtext ? '<div class="bd-sub">'+subtext+'</div>' : '')+
+        '</div>'+
+        '</div>';
+    });
+    h += '<div class="bd-total">'+
+      '<span class="bd-total-lbl">Total</span>'+
+      '<span class="bd-total-val">'+money(total)+'</span>'+
+      '</div>';
+    $('bd-body').innerHTML = h;
+  }catch(err){
+    $('bd-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function formatBreakdownDate(iso){
+  if(!iso) return '';
+  try{
+    var d = new Date(iso);
+    if(isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+  }catch(e){ return ''; }
+}
+
 async function doShareSend(){
   var r = state.shareReport;
   if(!r || !state.trip) return;
@@ -3853,7 +3966,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share'].forEach(function(id){
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
@@ -3908,6 +4021,8 @@ $('inv-send').onclick = sendBulkInvites;
 // Share settlement modal
 $('share-cancel').onclick = function(){ closeModal('modal-share'); };
 $('share-send').onclick = doShareSend;
+// Breakdown modal
+$('bd-close').onclick = function(){ closeModal('modal-breakdown'); };
 $('ap-search').addEventListener('input', function(){
   // Typing in search clears any previous directory pick
   $('ap-results').dataset.pickedDir = '';
