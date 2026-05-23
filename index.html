@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-5.5">
+<meta name="app-version" content="V2-5.6">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1004,7 +1004,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.5';
+var APP_VERSION = 'V2-5.6';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2491,19 +2491,26 @@ function renderSettlementTab(){
     if(balances.length === 0){
       h += '<div class="empty" style="padding:20px 0;"><div class="empty-sub">No members.</div></div>';
     }else{
+      // Build a directory_id → member map once for lookups (balances no
+      // longer carry name/initials in the new RPC payload).
+      var memberById = {};
+      (t.members||[]).forEach(function(m){ memberById[m.directory_id] = m; });
       h += '<div class="balance-list">';
       balances.forEach(function(b){
         var bn = Number(b.net)||0;
         var bcls = (Math.abs(bn)<0.005) ? 'even' : (bn>0 ? 'owed' : 'owe');
         var btext = (Math.abs(bn)<0.005) ? 'even' :
                     (bn>0 ? '+'+money(bn).replace('-','') : money(bn));
+        var m = memberById[b.directory_id];
+        var name = m ? displayName(m) : (b.name || 'Unknown');
+        var avatar = m ? initials(m) : '?';
         h += '<div class="bal-row">'+
           '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
-            esc(((b.name||'?')[0]||'?').toUpperCase())+'</div>'+
+            esc(avatar)+'</div>'+
           '<div class="bal-info">'+
-            '<div class="bal-name">'+esc(b.name)+
+            '<div class="bal-name">'+esc(name)+
               (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+'</div>'+
-            '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.share)+'</div>'+
+            '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.owes)+'</div>'+
           '</div>'+
           '<span class="pill '+bcls+'">'+btext+'</span>'+
           '</div>';
@@ -2514,25 +2521,38 @@ function renderSettlementTab(){
 
   // --- Transfers ---
   // Admin sees all. Non-admin only sees transfers involving themselves
-  // (backend already filtered).
+  // (we filter in the frontend now; backend returns all transfers).
   if(transfers.length > 0){
-    var label = callerAdmin ? 'Who pays whom' : 'Your settlements';
-    h += '<div class="tab-count" style="margin-top:14px;">'+label+'</div>';
-    h += '<div class="transfer-list">';
-    transfers.forEach(function(tr){
-      var fromMe = tr.from_id === myDirId;
-      var toMe   = tr.to_id   === myDirId;
-      h += '<div class="transfer-row">'+
-        '<span class="transfer-name'+(fromMe?' me':'')+'">'+esc(tr.from_name)+
-          (fromMe?' (You)':'')+'</span>'+
-        '<svg class="transfer-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>'+
-        '<span class="transfer-name'+(toMe?' me':'')+'">'+esc(tr.to_name)+
-          (toMe?' (You)':'')+'</span>'+
-        '<span class="transfer-amount">'+money(tr.amount)+'</span>'+
-        '</div>';
+    // Reuse the member lookup map if we already built it for balances.
+    var memberById2 = {};
+    (t.members||[]).forEach(function(m){ memberById2[m.directory_id] = m; });
+    var visibleTransfers = callerAdmin ? transfers : transfers.filter(function(tr){
+      return tr.from === myDirId || tr.to === myDirId;
     });
-    h += '</div>';
-  }else if(total > 0 && myBal && Math.abs(Number(myBal.net)||0) < 0.005){
+    if(visibleTransfers.length > 0){
+      var label = callerAdmin ? 'Who pays whom' : 'Your settlements';
+      h += '<div class="tab-count" style="margin-top:14px;">'+label+'</div>';
+      h += '<div class="transfer-list">';
+      visibleTransfers.forEach(function(tr){
+        var fromMe = tr.from === myDirId;
+        var toMe   = tr.to   === myDirId;
+        var fromM = memberById2[tr.from];
+        var toM   = memberById2[tr.to];
+        var fromName = fromM ? displayName(fromM) : 'Unknown';
+        var toName   = toM   ? displayName(toM)   : 'Unknown';
+        h += '<div class="transfer-row">'+
+          '<span class="transfer-name'+(fromMe?' me':'')+'">'+esc(fromName)+
+            (fromMe?' (You)':'')+'</span>'+
+          '<svg class="transfer-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>'+
+          '<span class="transfer-name'+(toMe?' me':'')+'">'+esc(toName)+
+            (toMe?' (You)':'')+'</span>'+
+          '<span class="transfer-amount">'+money(tr.amount)+'</span>'+
+          '</div>';
+      });
+      h += '</div>';
+    }
+  }
+  if(transfers.length === 0 && total > 0 && myBal && Math.abs(Number(myBal.net)||0) < 0.005){
     h += '<div style="font-size:13px;color:var(--c-text-2);text-align:center;'+
       'margin-top:14px;">You\'re all settled up.</div>';
   }
