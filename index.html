@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
+<meta name="app-version" content="V2-5.3">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -935,7 +936,7 @@
       <div style="font-size:14px;color:var(--c-text-2);margin-bottom:4px;">Signed in as</div>
       <div style="font-size:15px;font-weight:600;" id="acc-email"></div>
       <div style="font-size:13px;color:var(--c-text-3);margin-top:2px;" id="acc-role"></div>
-      <div style="font-size:11px;color:var(--c-text-3);margin-top:8px;opacity:0.7;" id="acc-version"></div>
+      <div id="acc-version" style="font-size:13px;color:var(--c-tint);margin-top:14px;cursor:pointer;text-align:center;font-weight:600;text-decoration:underline;text-underline-offset:3px;"></div>
       <button class="btn btn-secondary" id="acc-recycle" hidden style="margin-top:18px;display:flex;align-items:center;justify-content:center;gap:8px;">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
         <span>Recycle bin</span>
@@ -973,7 +974,63 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.2';
+var APP_VERSION = 'V2-5.3';
+
+// ----------------------------------------------------------------
+//  Auto-refresh on new deploy
+// ----------------------------------------------------------------
+// PWA mode on iOS has no pull-to-refresh, so users get stuck on stale
+// HTML when we deploy. To work around that, we periodically fetch our
+// own index.html, parse the <meta name="app-version"> tag, and if it's
+// different from the version that's currently running we force a
+// reload. Triggered on tab focus + every 15 minutes + manually by
+// tapping the version label in the Account modal.
+async function fetchLatestVersion(){
+  try{
+    // Cache-bust so we read what the server has now, not what the SW
+    // (or HTTP cache) might still be holding.
+    var url = window.location.pathname + '?_v=' + Date.now();
+    var resp = await fetch(url, { cache:'no-store' });
+    if(!resp.ok) return null;
+    var html = await resp.text();
+    var m = html.match(/<meta\s+name=["']app-version["']\s+content=["']([^"']+)["']/i);
+    return m ? m[1] : null;
+  }catch(err){
+    return null;
+  }
+}
+
+// `interactive` = called from a user tap (show "up to date" toast in
+// that case). Auto checks stay silent unless there's an upgrade.
+async function checkForNewVersion(interactive){
+  var latest = await fetchLatestVersion();
+  if(!latest){
+    if(interactive) toast('Could not check for updates', true);
+    return;
+  }
+  if(latest !== APP_VERSION){
+    if(interactive) toast('New version available — reloading…');
+    // Short delay so the toast is visible if shown, then hard reload.
+    setTimeout(function(){
+      // location.reload(true) is deprecated in modern browsers but the
+      // cache-bust in fetchLatestVersion plus no-cache headers already
+      // ensure we're hitting fresh assets next.
+      window.location.reload();
+    }, interactive ? 700 : 200);
+  }else if(interactive){
+    toast('You\'re on the latest version');
+  }
+}
+
+// Auto-trigger: whenever the page becomes visible (returning from
+// background or unlocking the phone), kick off a quiet check.
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible'){
+    checkForNewVersion(false);
+  }
+});
+// Plus a slow timer for tabs that stay visible all day.
+setInterval(function(){ checkForNewVersion(false); }, 15 * 60 * 1000);
 var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
@@ -2727,6 +2784,7 @@ function openAccount(){
   $('acc-role').textContent=state.profile&&state.profile.is_global_admin
     ? 'Global administrator' : 'Member';
   $('acc-version').textContent='Shared Expenses · '+APP_VERSION;
+  $('acc-version').onclick = function(){ checkForNewVersion(true); };
   // Recycle bin entry — only the global admin can see it.
   $('acc-recycle').hidden = !(state.profile && state.profile.is_global_admin);
   openModal('modal-account');
