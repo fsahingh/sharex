@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.1">
+<meta name="app-version" content="V2-6.2">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -440,14 +440,19 @@
   .pool-stat-val{font-size:15px;font-weight:700;}
   .pool-stat-row.big .pool-stat-val{font-size:18px;}
 
-  /* Treasurer picker rows. */
-  .trs-row{display:flex;align-items:center;gap:12px;padding:11px 12px;
+  /* Treasurer picker rows. Force flex layout — labels default to inline,
+     which on some browsers (mobile Safari) collapses children vertically. */
+  .trs-row{display:flex !important;flex-direction:row !important;
+    align-items:center;gap:12px;padding:11px 12px;
     background:var(--c-card);border-radius:var(--r-sm);margin-bottom:6px;
-    cursor:pointer;border:1px solid var(--c-border);min-width:0;}
-  .trs-row input[type="radio"]{flex-shrink:0;width:18px;height:18px;
-    accent-color:var(--c-tint);margin:0;}
+    cursor:pointer;border:1px solid var(--c-border);min-width:0;width:100%;
+    box-sizing:border-box;}
+  .trs-row > *{flex-shrink:0;}
+  .trs-row input[type="radio"]{width:20px;height:20px;
+    accent-color:var(--c-tint);margin:0;appearance:auto;-webkit-appearance:radio;}
   .trs-row:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);}
-  .trs-name{flex:1;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .trs-name{flex:1 1 auto;min-width:0;font-size:14px;font-weight:600;
+    display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
 
   /* Treasurer badge in People sekmesi + balance list. */
   .pico.treasurer{background:rgba(48,209,88,0.15);color:var(--c-success);}
@@ -1142,7 +1147,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.1';
+var APP_VERSION = 'V2-6.2';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
