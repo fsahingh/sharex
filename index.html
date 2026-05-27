@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-5.9">
+<meta name="app-version" content="V2-6.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -146,6 +146,10 @@
   .person-row.withdrew .person-avatar{background:var(--c-text-3);}
   .bal-row.withdrew{opacity:0.65;}
   .bal-row.withdrew .person-avatar{background:var(--c-text-3);}
+  /* Right-side stack on balance rows: pill on top, optional forfeit
+     italic note below it. */
+  .bal-right{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;}
+  .bal-forfeit-note{font-size:10.5px;font-style:italic;color:var(--c-text-3);}
 
   /* ---- ADD PERSON SEARCH RESULTS ---- */
   .ap-results{margin-top:4px;border:1px solid var(--c-border);
@@ -411,6 +415,20 @@
     background:rgba(10,132,255,0.12);color:var(--c-tint);
     padding:3px 7px;border-radius:6px;text-transform:uppercase;
     flex-shrink:0;}
+
+  /* Rows inside the expanded Pre-payments group card. */
+  .pre-line{display:flex;align-items:center;gap:10px;padding:10px 0;
+    border-bottom:0.5px solid var(--c-border);min-width:0;}
+  .pre-line:last-child{border-bottom:none;}
+  .pre-line.tappable{cursor:pointer;}
+  .pre-line.tappable:active{background:var(--c-bg);}
+  .pre-line-info{flex:1;min-width:0;}
+  .pre-line-names{font-size:14px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pre-line-date{font-size:11px;color:var(--c-text-3);margin-top:2px;}
+  .pre-line-amount{font-size:14px;font-weight:700;color:var(--c-tint);
+    flex-shrink:0;}
+  .pre-line-del{flex-shrink:0;}
   .ss-cell.tappable{cursor:pointer;}
   .ss-cell.tappable:active{transform:scale(0.98);}
   .my-card.tappable{cursor:pointer;}
@@ -1037,7 +1055,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.9';
+var APP_VERSION = 'V2-6.0';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1870,16 +1888,36 @@ function displayName(p){
 function renderPeopleTab(){
   var t=state.trip;
   var el=$('tab-people');
-  var n=(t.members||[]).length;
+  var allMembers = (t.members||[]).slice();
+  var withdrewCount = allMembers.filter(function(m){ return m.withdrew_at; }).length;
+  var activeCount = allMembers.length - withdrewCount;
   var canEditDirectory = !!(state.profile && state.profile.is_global_admin)
                        || !!(state.trip && state.trip.is_admin);
   // Count non-global admins on this trip — used to decide whether the
   // "Make admin" star is shown (cap of 2, global admin doesn't count).
-  var nonGlobalAdminCount = (t.members||[]).filter(function(m){
+  var nonGlobalAdminCount = allMembers.filter(function(m){
     return m.is_admin && !m.is_global_admin;
   }).length;
   var canPromoteMore = (nonGlobalAdminCount < 2);
-  var h='<div class="tab-count">'+n+' '+(n===1?'person':'people')+'</div>';
+  // Sort: active members first, withdrawn last; alphabetical (by first name,
+  // case-insensitive) within each group.
+  function byName(a, b){
+    return (displayName(a)||'').toLowerCase().localeCompare(
+           (displayName(b)||'').toLowerCase());
+  }
+  var members = allMembers.filter(function(m){ return !m.withdrew_at; }).sort(byName)
+    .concat(allMembers.filter(function(m){ return m.withdrew_at; }).sort(byName));
+  // Count text: "X people" normally, or the three-part breakdown when
+  // some members have withdrawn.
+  var countText;
+  if(withdrewCount > 0){
+    countText = activeCount + ' active participant'+(activeCount===1?'':'s')+
+      ', '+withdrewCount+' withdrew, '+
+      allMembers.length+' total people';
+  }else{
+    countText = allMembers.length + ' ' + (allMembers.length===1?'person':'people');
+  }
+  var h = '<div class="tab-count">'+esc(countText)+'</div>';
   // Admins can send sign-in invites in bulk.
   if(t.is_admin){
     h += '<button id="people-invite-btn" class="btn btn-secondary" '+
@@ -1889,7 +1927,7 @@ function renderPeopleTab(){
       '<span>Send sign-in invites</span>'+
       '</button>';
   }
-  (t.members||[]).forEach(function(m){
+  members.forEach(function(m){
     var isWithdrawn = !!m.withdrew_at;
     h += '<div class="person-row'+(isWithdrawn?' withdrew':'')+'">'+
       '<div class="person-avatar">'+esc(initials(m))+'</div>'+
@@ -2046,27 +2084,37 @@ function renderExpensesTab(){
   var nameById={};
   (t.members||[]).forEach(function(m){ nameById[m.directory_id]=displayName(m); });
 
-  var h = '<div class="tab-count">'+list.length+' '+(list.length===1?'expense':'expenses')+'</div>';
-  list.forEach(function(e){
-    var isPre = (e.kind === 'prepayment');
+  // Split into expenses + prepayments. Backend sorted with prepayments
+  // first; we want regular expenses on top (newest first) and a single
+  // grouped prepayments card at the bottom.
+  function byDateDesc(a,b){
+    var da = a.added_at || '', db = b.added_at || '';
+    return db.localeCompare(da);
+  }
+  var expenses    = list.filter(function(e){ return e.kind !== 'prepayment'; }).sort(byDateDesc);
+  var prepayments = list.filter(function(e){ return e.kind === 'prepayment'; }).sort(byDateDesc);
+
+  // Count label includes both kinds.
+  var countParts = [];
+  if(expenses.length)    countParts.push(expenses.length+' '+(expenses.length===1?'expense':'expenses'));
+  if(prepayments.length) countParts.push(prepayments.length+' pre-payment'+(prepayments.length===1?'':'s'));
+  var h = '<div class="tab-count">'+countParts.join(' · ')+'</div>';
+
+  // --- Regular expenses (newest first) ---
+  expenses.forEach(function(e){
     var splitIds = e.split_ids || [];
-    var perPerson = (!isPre && splitIds.length) ? (Number(e.amount)/splitIds.length) : 0;
+    var perPerson = splitIds.length ? (Number(e.amount)/splitIds.length) : 0;
     var open = (state.expandedExpense === e.expense_id);
     var pending = !!e.has_pending_request;
-    h += '<div class="exp-card'+(pending?' has-pending':'')+(isPre?' is-pre':'')+'">'+
+    h += '<div class="exp-card'+(pending?' has-pending':'')+'">'+
       '<button class="exp-row" data-toggle="'+e.expense_id+'">'+
-        (isPre ? '<span class="pre-badge">Pre</span>' : '')+
         '<div class="exp-left">'+
           '<div class="exp-desc-row">'+
             '<span class="exp-desc">'+esc(e.description)+'</span>'+
             (pending ? '<span class="pending-badge" title="A change request is awaiting review">Pending request</span>' : '')+
           '</div>'+
-          '<div class="exp-meta">'+
-            (isPre
-              ? 'From '+esc(e.paid_by_name||'?')+' to '+esc(e.paid_to_name||'?')
-              : 'Paid by '+esc(e.paid_by_name||'?')+' · '+
-                splitIds.length+' '+(splitIds.length===1?'share':'shares'))+
-          '</div>'+
+          '<div class="exp-meta">Paid by '+esc(e.paid_by_name||'?')+' · '+
+            splitIds.length+' '+(splitIds.length===1?'share':'shares')+'</div>'+
         '</div>'+
         '<span class="exp-amount">'+money(Number(e.amount))+'</span>'+
         '<span class="exp-chevron'+(open?' open':'')+'">'+
@@ -2074,16 +2122,6 @@ function renderExpensesTab(){
         '</span>'+
       '</button>';
     if(open){
-      if(isPre){
-        // Prepayments have no split panel — just an admin action row.
-        h += '<div class="exp-split-panel">';
-        if(!t.settled && t.is_admin){
-          h += '<div style="display:flex;gap:8px;margin-top:4px;">'+
-            '<button class="btn btn-secondary" data-edit="'+e.expense_id+'" style="margin-top:0;">Edit</button>'+
-            '</div>';
-        }
-        h += '</div>';
-      }else{
       h += '<div class="exp-split-panel">'+
         '<div class="exp-split-head-row">'+
           '<span class="exp-split-head">Split between '+splitIds.length+'</span>'+
@@ -2110,12 +2148,62 @@ function renderExpensesTab(){
         }
       }
       h += '</div>';
-      }
     }
     h += '</div>';
   });
+
+  // --- Pre-payments group card (always at the bottom) ---
+  if(prepayments.length > 0){
+    var preOpen = (state.expandedExpense === '__prepayments__');
+    var preTotal = prepayments.reduce(function(a,e){ return a + (Number(e.amount)||0); }, 0);
+    h += '<div class="exp-card is-pre-group">'+
+      '<button class="exp-row" data-toggle="__prepayments__">'+
+        '<span class="pre-badge">Pre</span>'+
+        '<div class="exp-left">'+
+          '<div class="exp-desc-row">'+
+            '<span class="exp-desc">Pre-payments</span>'+
+          '</div>'+
+          '<div class="exp-meta">'+prepayments.length+' transfer'+(prepayments.length===1?'':'s')+'</div>'+
+        '</div>'+
+        '<span class="exp-amount">'+money(preTotal)+'</span>'+
+        '<span class="exp-chevron'+(preOpen?' open':'')+'">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'+
+        '</span>'+
+      '</button>';
+    if(preOpen){
+      h += '<div class="exp-split-panel" style="padding-top:8px;">';
+      prepayments.forEach(function(p){
+        var canEdit = !t.settled && t.is_admin;
+        h += '<div class="pre-line'+(canEdit?' tappable':'')+'"'+
+          (canEdit?' data-edit="'+p.expense_id+'"':'')+'>'+
+          '<div class="pre-line-info">'+
+            '<div class="pre-line-names">'+esc(p.paid_by_name||'?')+' '+
+              '<span style="color:var(--c-text-3);">→</span> '+esc(p.paid_to_name||'?')+
+            '</div>'+
+            '<div class="pre-line-date">'+esc(formatBreakdownDate(p.added_at)||'')+'</div>'+
+          '</div>'+
+          '<span class="pre-line-amount">'+money(Number(p.amount)||0)+'</span>'+
+          (canEdit
+            ? '<button class="icon-btn-sm danger pre-line-del" data-pre-delete="'+p.expense_id+'" title="Delete">'+
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>'+
+              '</button>'
+            : '')+
+          '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+  }
   el.innerHTML = h;
   el.onclick = function(ev){
+    // Pre-payment trash button: handle first and stop the click from
+    // bubbling up to the parent row (which would also trigger edit).
+    var pd = ev.target.closest('[data-pre-delete]');
+    if(pd){
+      ev.stopPropagation();
+      doDeletePrepayment(pd.dataset.preDelete);
+      return;
+    }
     var ed = ev.target.closest('[data-edit]');
     if(ed){ openExpenseModal(ed.dataset.edit, 'admin'); return; }
     var re = ev.target.closest('[data-request-edit]');
@@ -2129,6 +2217,20 @@ function renderExpensesTab(){
       renderExpensesTab();
     }
   };
+}
+
+async function doDeletePrepayment(expenseId){
+  if(!await alertModal('Delete this pre-payment? This cannot be undone.',
+       { confirm:true, danger:true, confirmLabel:'Delete' })) return;
+  try{
+    var res = await sb.rpc('delete_expense', { p_expense: expenseId });
+    if(res.error) throw res.error;
+    toast('Deleted');
+    state.settlementLoadedFor = null;
+    await loadExpenses();
+  }catch(err){
+    toast(err.message || 'Could not delete', true);
+  }
 }
 
 async function doRequestDelete(expenseId){
@@ -2531,8 +2633,18 @@ function renderSettlementTab(){
       // longer carry name/initials in the new RPC payload).
       var memberById = {};
       (t.members||[]).forEach(function(m){ memberById[m.directory_id] = m; });
+      // Sort: active first, withdrawn last; within each group leave the
+      // server's order (which is "all members in trip_members order").
+      var balSorted = balances.slice().sort(function(a, b){
+        var aw = !!(a.withdrew || (memberById[a.directory_id] && memberById[a.directory_id].withdrew_at));
+        var bw = !!(b.withdrew || (memberById[b.directory_id] && memberById[b.directory_id].withdrew_at));
+        if(aw !== bw) return aw ? 1 : -1;
+        var an = memberById[a.directory_id] ? displayName(memberById[a.directory_id]) : '';
+        var bn = memberById[b.directory_id] ? displayName(memberById[b.directory_id]) : '';
+        return an.toLowerCase().localeCompare(bn.toLowerCase());
+      });
       h += '<div class="balance-list">';
-      balances.forEach(function(b){
+      balSorted.forEach(function(b){
         var bn = Number(b.net)||0;
         var bcls = (Math.abs(bn)<0.005) ? 'even' : (bn>0 ? 'owed' : 'owe');
         var btext = (Math.abs(bn)<0.005) ? 'even' :
@@ -2541,6 +2653,15 @@ function renderSettlementTab(){
         var name = m ? displayName(m) : (b.name || 'Unknown');
         var avatar = m ? initials(m) : '?';
         var isWithdrawn = !!(b.withdrew || (m && m.withdrew_at));
+        // For withdrawn members the post-forfeit net is 0 (positive
+        // forfeited) or negative (still owes). The raw net before the
+        // forfeit clip is paid - owes; if that was positive, that's
+        // what got forfeited. Show it as an italic note next to the pill.
+        var rawNet = (Number(b.paid)||0) - (Number(b.owes)||0);
+        var forfeitNote = '';
+        if(isWithdrawn && rawNet > 0.005){
+          forfeitNote = '<div class="bal-forfeit-note">'+money(rawNet)+' forfeited</div>';
+        }
         h += '<div class="bal-row'+(isWithdrawn?' withdrew':'')+'">'+
           '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
             esc(avatar)+'</div>'+
@@ -2550,7 +2671,10 @@ function renderSettlementTab(){
               (isWithdrawn?' <span class="pico withdrew">Withdrew</span>':'')+'</div>'+
             '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.owes)+'</div>'+
           '</div>'+
-          '<span class="pill '+bcls+'">'+btext+'</span>'+
+          '<div class="bal-right">'+
+            '<span class="pill '+bcls+'">'+btext+'</span>'+
+            forfeitNote+
+          '</div>'+
           '</div>';
       });
       h += '</div>';
