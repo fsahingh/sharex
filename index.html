@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-5.7">
+<meta name="app-version" content="V2-5.8">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -140,6 +140,12 @@
   .pico.admin{background:var(--c-tint-bg);color:var(--c-tint);}
   .pico.me{background:rgba(48,209,88,0.15);color:var(--c-success);}
   .pico.noacc{background:rgba(255,149,0,0.13);color:var(--c-warn);}
+  .pico.withdrew{background:rgba(255,69,58,0.13);color:var(--c-danger);}
+  /* Faded look for withdrawn members in the People list. */
+  .person-row.withdrew{opacity:0.55;}
+  .person-row.withdrew .person-avatar{background:var(--c-text-3);}
+  .bal-row.withdrew{opacity:0.65;}
+  .bal-row.withdrew .person-avatar{background:var(--c-text-3);}
 
   /* ---- ADD PERSON SEARCH RESULTS ---- */
   .ap-results{margin-top:4px;border:1px solid var(--c-border);
@@ -758,6 +764,16 @@
         <div class="tab-count" style="padding:0 0 6px;">Trips</div>
         <div id="ep-trips-list" class="balance-list" style="margin-bottom:0;"></div>
       </div>
+      <!-- Withdraw / restore: only meaningful when this modal was opened
+           from a trip context where the caller is admin of that trip.
+           See openEditPerson() for the visibility logic. -->
+      <div id="ep-withdraw-section" style="margin-top:18px;" hidden>
+        <div class="tab-count" style="padding:0 0 6px;">Trip participation</div>
+        <div id="ep-withdraw-info" style="font-size:12.5px;color:var(--c-text-2);
+          line-height:1.45;margin-bottom:10px;"></div>
+        <button id="ep-withdraw-btn" class="btn btn-secondary"
+          style="margin-top:0;width:100%;font-size:13px;"></button>
+      </div>
       <div class="msg" id="ep-msg"></div>
     </div>
     <div class="modal-actions">
@@ -1021,7 +1037,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.7';
+var APP_VERSION = 'V2-5.8';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1874,23 +1890,25 @@ function renderPeopleTab(){
       '</button>';
   }
   (t.members||[]).forEach(function(m){
-    h += '<div class="person-row">'+
+    var isWithdrawn = !!m.withdrew_at;
+    h += '<div class="person-row'+(isWithdrawn?' withdrew':'')+'">'+
       '<div class="person-avatar">'+esc(initials(m))+'</div>'+
       '<div class="person-info">'+
         '<div class="person-name-row">'+
           '<span class="person-name">'+esc(displayName(m))+'</span>'+
           (m.is_me ? '<span class="pico me">You</span>' : '')+
           (m.is_admin ? '<span class="pico admin">Admin</span>' : '')+
+          (isWithdrawn ? '<span class="pico withdrew">Withdrew</span>' : '')+
           (!m.has_account ? '<span class="pico noacc">No account</span>' : '')+
         '</div>'+
         (m.email ? '<div class="person-email">'+esc(m.email)+'</div>' : '')+
       '</div>';
     var actions = '';
     // Make admin — visible to trip admins, for non-admin members only,
-    // unsettled trips only, when there's room for another admin, and
-    // only when the target has an account (otherwise the nomination
-    // notification has nowhere to land).
-    if(t.is_admin && !t.settled && !m.is_me && !m.is_admin && m.has_account && canPromoteMore){
+    // unsettled trips only, when there's room for another admin, only
+    // when the target has an account, and never for withdrawn members.
+    if(t.is_admin && !t.settled && !m.is_me && !m.is_admin
+       && m.has_account && canPromoteMore && !isWithdrawn){
       actions +=
         '<button class="icon-btn-sm" data-make-admin="'+m.directory_id+'" title="Nominate as admin">'+
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'+
@@ -2522,12 +2540,14 @@ function renderSettlementTab(){
         var m = memberById[b.directory_id];
         var name = m ? displayName(m) : (b.name || 'Unknown');
         var avatar = m ? initials(m) : '?';
-        h += '<div class="bal-row">'+
+        var isWithdrawn = !!(b.withdrew || (m && m.withdrew_at));
+        h += '<div class="bal-row'+(isWithdrawn?' withdrew':'')+'">'+
           '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
             esc(avatar)+'</div>'+
           '<div class="bal-info">'+
             '<div class="bal-name">'+esc(name)+
-              (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+'</div>'+
+              (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+
+              (isWithdrawn?' <span class="pico withdrew">Withdrew</span>':'')+'</div>'+
             '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.owes)+'</div>'+
           '</div>'+
           '<span class="pill '+bcls+'">'+btext+'</span>'+
@@ -3113,6 +3133,10 @@ async function openEditPerson(dirId){
       $('ep-trips-list').innerHTML = th;
       show('ep-trips-section');
     }
+    // Withdraw / restore — only when this modal was opened from a trip
+    // view AND the caller is admin of that trip AND the target is a
+    // non-admin member of it.
+    setupWithdrawSection(p);
     // Delete button: always visible to global admin; but the actual
     // deletion is blocked if the person is in an active trip or has any
     // expense history. When blocked, the trash icon stays but is faded;
@@ -3135,6 +3159,108 @@ async function openEditPerson(dirId){
   }catch(err){
     closeModal('modal-edit-person');
     toast(err.message||'Could not load person', true);
+  }
+}
+
+// Withdraw section (Edit Person) — managed entirely client-side because
+// the visibility logic depends on the *current trip* context, which the
+// directory RPC doesn't know about. We look up the target in state.trip.members.
+function setupWithdrawSection(p){
+  hide('ep-withdraw-section');
+  var t = state.trip;
+  // Only meaningful when we're inside a trip view, the trip is unsettled,
+  // and the caller is admin of that trip.
+  if(!t || t.settled || !t.is_admin) return;
+  // The target must be a member of this specific trip.
+  var member = (t.members||[]).find(function(m){
+    return m.directory_id === p.directory_id;
+  });
+  if(!member) return;
+  // Can't withdraw yourself, and can't withdraw an admin (they have to
+  // resign first; the backend enforces this too).
+  if(member.is_me || member.is_admin) return;
+
+  var isWithdrawn = !!member.withdrew_at;
+  var btn = $('ep-withdraw-btn');
+  var info = $('ep-withdraw-info');
+  if(isWithdrawn){
+    info.textContent = 'This person has withdrawn from "'+t.name+'". '+
+      'They\'re excluded from future Everyone-mode expenses. Any non-returnable '+
+      'money they contributed stays toward the trip — their positive balance '+
+      'is forfeited and split among the remaining members.';
+    btn.textContent = 'Restore participation';
+    btn.style.color = 'var(--c-success)';
+    btn.style.background = 'rgba(48,209,88,0.10)';
+    btn.style.borderColor = 'transparent';
+    btn.onclick = function(){ doRestoreMember(p.directory_id); };
+  }else{
+    info.textContent = 'Mark this person as withdrawn from "'+t.name+'". '+
+      'Their positive balance (if any) is forfeited and split equally among '+
+      'the remaining members. Negative balance — they still owe. Future '+
+      'Everyone-mode expenses will skip them automatically. This is reversible.';
+    btn.textContent = 'Withdraw from trip (forfeit)';
+    btn.style.color = 'var(--c-warn)';
+    btn.style.background = 'rgba(255,149,0,0.10)';
+    btn.style.borderColor = 'transparent';
+    btn.onclick = function(){ doWithdrawMember(p.directory_id); };
+  }
+  show('ep-withdraw-section');
+}
+
+async function doWithdrawMember(dirId){
+  if(!state.trip) return;
+  var t = state.trip;
+  var member = (t.members||[]).find(function(m){ return m.directory_id === dirId; });
+  var nm = member ? displayName(member) : 'this person';
+  var ok = await alertModal('Withdraw '+nm+' from "'+t.name+'"?\n\n'+
+    'Their positive balance will be forfeited and shared equally among the '+
+    'other members. They\'ll be excluded from new Everyone-mode expenses. '+
+    'You can restore them later.',
+    { confirm:true, confirmLabel:'Withdraw', danger:true });
+  if(!ok) return;
+  overlay('Withdrawing…');
+  try{
+    var res = await sb.rpc('withdraw_member', {
+      p_trip: state.trip.trip_id, p_dir: dirId
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-edit-person');
+    overlayOff();
+    toast('Withdrawn');
+    state.settlementLoadedFor = null;
+    state.expensesLoadedFor = null;
+    await reloadTrip();
+  }catch(err){
+    overlayOff();
+    toast(err.message || 'Could not withdraw', true);
+  }
+}
+
+async function doRestoreMember(dirId){
+  if(!state.trip) return;
+  var t = state.trip;
+  var member = (t.members||[]).find(function(m){ return m.directory_id === dirId; });
+  var nm = member ? displayName(member) : 'this person';
+  var ok = await alertModal('Restore '+nm+' to "'+t.name+'"?\n\n'+
+    'They\'ll be active again — included in Everyone-mode expenses, and '+
+    'their balance will compute normally.',
+    { confirm:true, confirmLabel:'Restore' });
+  if(!ok) return;
+  overlay('Restoring…');
+  try{
+    var res = await sb.rpc('restore_member', {
+      p_trip: state.trip.trip_id, p_dir: dirId
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-edit-person');
+    overlayOff();
+    toast('Restored');
+    state.settlementLoadedFor = null;
+    state.expensesLoadedFor = null;
+    await reloadTrip();
+  }catch(err){
+    overlayOff();
+    toast(err.message || 'Could not restore', true);
   }
 }
 
