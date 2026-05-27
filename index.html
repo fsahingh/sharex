@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-5.8">
+<meta name="app-version" content="V2-5.9">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1037,7 +1037,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-5.8';
+var APP_VERSION = 'V2-5.9';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3716,10 +3716,15 @@ async function openMyActivity(){
     var sumPaidPre = paidPrepay.reduce(function(a,r){ return a + (Number(r.amount)||0); }, 0);
     var sumShare   = sharedRows.reduce(function(a,r){ return a + (Number(r.my_share)||0); }, 0);
     var sumRecv    = receivedRows.reduce(function(a,r){ return a + (Number(r.amount)||0); }, 0);
-    var net = sumPaidExp + sumPaidPre - sumShare - sumRecv;
+    // Forfeit credit: when other members withdraw with a positive balance,
+    // that pool is distributed equally to the remaining active members.
+    // It enters as a "plus" on my side — same sign as money I paid.
+    var forfeitCredit = Number(data.forfeit_credit) || 0;
+    var net = sumPaidExp + sumPaidPre + forfeitCredit - sumShare - sumRecv;
 
     if(paidExpense.length === 0 && paidPrepay.length === 0 &&
-       sharedRows.length === 0 && receivedRows.length === 0){
+       sharedRows.length === 0 && receivedRows.length === 0 &&
+       forfeitCredit < 0.005){
       $('bd-body').innerHTML =
         '<div class="empty" style="padding:30px 0;">'+
         '<div class="empty-sub">You haven\'t been part of any expenses or pre-payments yet.</div></div>';
@@ -3766,7 +3771,25 @@ async function openMyActivity(){
         '</div>';
     });
 
-    // Group 3 — Your share of expenses
+    // Group 3 — Forfeit credit (only when someone withdrew with a positive
+    // balance, so the active members get a share of that pool).
+    if(forfeitCredit >= 0.005){
+      h += '<div class="bd-group">'+
+        '<div class="bd-group-head">'+
+          '<span class="bd-group-title">Credit from withdrawn members</span>'+
+          '<span class="bd-group-total plus">+'+money(forfeitCredit)+'</span>'+
+        '</div>'+
+        '<div class="bd-row">'+
+          '<div class="bd-info">'+
+            '<div class="bd-desc">Your share of the forfeited pool</div>'+
+            '<div class="bd-date">Distributed equally among active members</div>'+
+          '</div>'+
+          '<div class="bd-amount">'+money(forfeitCredit)+'</div>'+
+        '</div>'+
+        '</div>';
+    }
+
+    // Group 4 — Your share of expenses
     renderGroup('Your share of expenses', sharedRows, 'minus', sumShare, function(r){
       return '<div class="bd-row">'+
         '<div class="bd-info">'+
@@ -3779,7 +3802,7 @@ async function openMyActivity(){
         '</div>';
     });
 
-    // Group 4 — Pre-payments to me
+    // Group 5 — Pre-payments to me
     renderGroup('Pre-payments to you', receivedRows, 'minus', sumRecv, function(r){
       return '<div class="bd-row">'+
         '<span class="pre-badge" style="margin-right:4px;">Pre</span>'+
