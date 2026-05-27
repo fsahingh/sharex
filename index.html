@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.2">
+<meta name="app-version" content="V2-6.3">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -315,6 +315,10 @@
   .bal-info{flex:1;min-width:0;}
   .bal-name{font-size:14px;font-weight:600;}
   .bal-sub{font-size:11px;color:var(--c-text-2);margin-top:1px;}
+  /* Plain-grey explanation line under a treasurer's balance row.
+     Renders directly under bal-sub; only shown for the treasurer. */
+  .bal-treasurer-note{font-size:11px;color:var(--c-text-3);margin-top:2px;
+    line-height:1.4;}
 
   .transfer-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
     box-shadow:var(--shadow);}
@@ -439,6 +443,22 @@
   .pool-stat-row.big .pool-stat-lbl{font-size:14px;color:inherit;}
   .pool-stat-val{font-size:15px;font-weight:700;}
   .pool-stat-row.big .pool-stat-val{font-size:18px;}
+
+  /* New per-person breakdown sections inside the Pool modal. */
+  .pool-section-title{font-size:12px;font-weight:700;letter-spacing:0.4px;
+    text-transform:uppercase;color:var(--c-text-3);margin-top:14px;margin-bottom:6px;}
+  .pool-line{display:flex;justify-content:space-between;align-items:center;
+    padding:8px 0;border-bottom:0.5px solid var(--c-border);font-size:13px;}
+  .pool-line:last-child{border-bottom:none;}
+  .pool-line-name{flex:1;min-width:0;color:var(--c-text);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    display:flex;align-items:center;gap:6px;}
+  .pool-line-amt{font-size:14px;font-weight:600;color:var(--c-text);flex-shrink:0;}
+  .pool-line-total{margin-top:2px;padding-top:8px;border-top:1px solid var(--c-border);
+    border-bottom:none;font-weight:700;}
+  .pool-line-total .pool-line-name,
+  .pool-line-total .pool-line-amt{color:var(--c-text);font-weight:700;}
+  .pool-empty{font-size:12.5px;color:var(--c-text-3);padding:8px 0;font-style:italic;}
 
   /* Treasurer picker rows. Force flex layout — labels default to inline,
      which on some browsers (mobile Safari) collapses children vertically. */
@@ -1147,7 +1167,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.2';
+var APP_VERSION = 'V2-6.3';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2682,9 +2702,21 @@ function renderSettlementTab(){
 
   // ---- Top row: Total cost | Lock | Pool ----
   // Pool card shows the treasury balance when a treasurer is set.
-  // When not set: a placeholder card the admin can tap to enable.
+  // New definition: Pool Balance = all prepayments (IN) - all real
+  // expenses (OUT), regardless of who paid. This reflects "how much
+  // of the trip's spending the pool covered". Negative means the
+  // pool was overdrawn and out-of-pocket contributions cover the rest.
   var hasTreasurer = !!s.treasurer_directory_id;
-  var poolBalance = Number(s.pool_balance)||0;
+  var poolBalance = 0;
+  if(hasTreasurer){
+    var pIn = 0, pOut = 0;
+    (state.expenses||[]).forEach(function(e){
+      var amt = Number(e.amount)||0;
+      if(e.kind === 'prepayment') pIn += amt;
+      else pOut += amt;
+    });
+    poolBalance = pIn - pOut;
+  }
   var treasurerMember = hasTreasurer ? (t.members||[]).find(function(m){
     return m.directory_id === s.treasurer_directory_id;
   }) : null;
@@ -2694,8 +2726,10 @@ function renderSettlementTab(){
                     : (poolBalance < -0.005) ? 'pool-negative' : '';
     poolHtml =
       '<div class="ss-cell ss-pool tappable" id="ss-pool" role="button">'+
-        '<div class="ss-lbl">Pool</div>'+
-        '<div class="ss-val '+poolValCls+'">'+money(poolBalance)+'</div>'+
+        '<div class="ss-lbl">Pool Balance</div>'+
+        '<div class="ss-val '+poolValCls+'">'+
+          (poolBalance < -0.005 ? '−' : '')+
+          money(Math.abs(poolBalance))+'</div>'+
         (treasurerMember
           ? '<div class="ss-pool-sub">'+esc(displayName(treasurerMember))+'</div>'
           : '')+
@@ -2703,13 +2737,13 @@ function renderSettlementTab(){
   }else if(t.is_admin && !t.settled){
     poolHtml =
       '<div class="ss-cell ss-pool ss-pool-empty tappable" id="ss-pool" role="button">'+
-        '<div class="ss-lbl">Pool</div>'+
+        '<div class="ss-lbl">Pool Balance</div>'+
         '<div class="ss-pool-empty-text">Not set</div>'+
       '</div>';
   }else{
     poolHtml =
       '<div class="ss-cell ss-pool ss-pool-disabled">'+
-        '<div class="ss-lbl">Pool</div>'+
+        '<div class="ss-lbl">Pool Balance</div>'+
         '<div class="ss-pool-empty-text">—</div>'+
       '</div>';
   }
@@ -2729,10 +2763,18 @@ function renderSettlementTab(){
     var ncls = (Math.abs(n) < 0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
     var nlbl = (Math.abs(n) < 0.005) ? 'You\'re even' :
                (n>0 ? 'You\'re owed' : 'You owe');
+    // "You paid" should NOT include the forfeit credit (the breakdown
+    // modal shows it as a separate group). Subtract it back out so the
+    // top-line card matches what the breakdown adds up to before forfeit.
+    var youPaidRaw = Number(myBal.paid) || 0;
+    if(!myBal.withdrew && Number(s.active_count) > 0){
+      var myCredit = (Number(s.forfeit_pool) || 0) / Number(s.active_count);
+      youPaidRaw -= myCredit;
+    }
     h += '<div class="my-row">'+
       '<div class="my-card tappable" id="ss-youpaid" role="button">'+
         '<div class="my-lbl">You paid</div>'+
-        '<div class="my-amt">'+money(Number(myBal.paid)||0)+'</div></div>'+
+        '<div class="my-amt">'+money(youPaidRaw)+'</div></div>'+
       '<div class="my-card '+ncls+' tappable" id="ss-yournet" role="button">'+
         '<div class="my-lbl">'+nlbl+'</div>'+
         '<div class="my-amt">'+money(Math.abs(n))+'</div></div>'+
@@ -2749,6 +2791,32 @@ function renderSettlementTab(){
       // longer carry name/initials in the new RPC payload).
       var memberById = {};
       (t.members||[]).forEach(function(m){ memberById[m.directory_id] = m; });
+
+      // Per-person breakdown from state.expenses — needed to show the
+      // "Prepay · Expense · Share" split on each balance row.
+      //  - prepay  = pre-payments this person contributed into the pool
+      //  - expense = real-expense payments this person made out of pocket
+      //  - share   = sum of their share across all real expenses
+      // This mirrors the math in get_trip_settlement; it's safe to do in
+      // the browser because state.expenses is the same source the RPC reads.
+      var stats = {};
+      function ensureStat(id){
+        if(!stats[id]) stats[id] = { prepay:0, expense:0, share:0 };
+        return stats[id];
+      }
+      (state.expenses||[]).forEach(function(e){
+        if(e.kind === 'prepayment'){
+          ensureStat(e.paid_by).prepay += Number(e.amount) || 0;
+        }else{
+          ensureStat(e.paid_by).expense += Number(e.amount) || 0;
+          var splitIds = e.split_ids || [];
+          if(splitIds.length > 0){
+            var per = (Number(e.amount)||0) / splitIds.length;
+            splitIds.forEach(function(sid){ ensureStat(sid).share += per; });
+          }
+        }
+      });
+
       // Sort: active first, withdrawn last; within each group leave the
       // server's order (which is "all members in trip_members order").
       var balSorted = balances.slice().sort(function(a, b){
@@ -2759,6 +2827,11 @@ function renderSettlementTab(){
         var bn = memberById[b.directory_id] ? displayName(memberById[b.directory_id]) : '';
         return an.toLowerCase().localeCompare(bn.toLowerCase());
       });
+      // Per-active forfeit credit (same formula as backend).
+      var perActiveCredit = 0;
+      if(Number(s.active_count) > 0){
+        perActiveCredit = (Number(s.forfeit_pool)||0) / Number(s.active_count);
+      }
       h += '<div class="balance-list">';
       balSorted.forEach(function(b){
         var bn = Number(b.net)||0;
@@ -2778,6 +2851,39 @@ function renderSettlementTab(){
         if(isWithdrawn && rawNet > 0.005){
           forfeitNote = '<div class="bal-forfeit-note">'+money(rawNet)+' forfeited</div>';
         }
+        // Build the breakdown sub-line: "Prepay $X · Expense $Y · Share $Z[ · Forfeit $W]"
+        var ps = stats[b.directory_id] || { prepay:0, expense:0, share:0 };
+        var myForfeit = isWithdrawn ? 0 : perActiveCredit;
+        var subParts = [
+          'Prepay '+money(ps.prepay),
+          'Expense '+money(ps.expense),
+          'Share '+money(ps.share)
+        ];
+        if(myForfeit > 0.005) subParts.push('Forfeit +'+money(myForfeit));
+        // Treasurer-only note: the treasurer's net is the sum of two
+        // amounts — the surplus they still hold as cash on behalf of
+        // the group, and their own out-of-pocket personal share.
+        // We compute the surplus directly from treasurer-only flows
+        // (prepayments received minus real expenses paid out) since
+        // the Pool Balance card now uses the broader "all-in/all-out"
+        // definition and would confuse this decomposition.
+        var treasurerNote = '';
+        if(m && m.is_treasurer && !isWithdrawn){
+          // Holding = prepayments received by the treasurer minus their
+          // out-of-pocket expense payments. Positive means they're
+          // sitting on group cash to redistribute.
+          var trsPrepayReceived = 0;
+          (state.expenses||[]).forEach(function(e){
+            if(e.kind === 'prepayment' && e.paid_to === b.directory_id){
+              trsPrepayReceived += Number(e.amount)||0;
+            }
+          });
+          var holding = trsPrepayReceived - ps.expense;
+          var ownDeficit = ps.share - ps.prepay - myForfeit;
+          treasurerNote = '<div class="bal-treasurer-note">'+
+            'Net = Holding '+money(holding)+' + Own share '+money(ownDeficit)+
+            '</div>';
+        }
         h += '<div class="bal-row'+(isWithdrawn?' withdrew':'')+'">'+
           '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
             esc(avatar)+'</div>'+
@@ -2786,7 +2892,8 @@ function renderSettlementTab(){
               (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+
               (m && m.is_treasurer?' <span class="pico treasurer">Treasurer</span>':'')+
               (isWithdrawn?' <span class="pico withdrew">Withdrew</span>':'')+'</div>'+
-            '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.owes)+'</div>'+
+            '<div class="bal-sub">'+subParts.join(' · ')+'</div>'+
+            treasurerNote+
           '</div>'+
           '<div class="bal-right">'+
             '<span class="pill '+bcls+'">'+btext+'</span>'+
@@ -2869,30 +2976,95 @@ function openPoolModal(){
       return m.directory_id === s.treasurer_directory_id;
     });
     var nm = member ? displayName(member) : 'Unknown';
-    var poolIn  = Number(s.pool_in)  || 0;
-    var poolOut = Number(s.pool_out) || 0;
-    var poolBal = Number(s.pool_balance) || 0;
-    var balCls = (poolBal > 0.005) ? 'pool-positive'
-               : (poolBal < -0.005) ? 'pool-negative' : '';
-    var balLbl = (poolBal > 0.005) ? 'Available in pool'
-               : (poolBal < -0.005) ? 'Treasurer over-paid'
-               : 'Pool empty';
+    var memberById = {};
+    (t.members||[]).forEach(function(m){ memberById[m.directory_id] = m; });
+
+    // Per-person aggregates from state.expenses — same source the RPC uses.
+    var contribByDir = {};      // dir → prepayment total into pool
+    var spentByDir   = {};      // dir → real-expense total they paid
+    var poolIn = 0, poolOut = 0;
+    (state.expenses||[]).forEach(function(e){
+      if(e.kind === 'prepayment'){
+        var amt = Number(e.amount)||0;
+        contribByDir[e.paid_by] = (contribByDir[e.paid_by]||0) + amt;
+        poolIn += amt;
+      }else{
+        var amtE = Number(e.amount)||0;
+        spentByDir[e.paid_by] = (spentByDir[e.paid_by]||0) + amtE;
+        poolOut += amtE;
+      }
+    });
+    var poolBalance = poolIn - poolOut;
+
+    // --- Treasurer header ---
     body +=
       '<div class="pool-stat-row">'+
         '<span class="pool-stat-lbl">Treasurer</span>'+
         '<span class="pool-stat-val">'+esc(nm)+'</span>'+
-      '</div>'+
-      '<div class="pool-stat-row">'+
-        '<span class="pool-stat-lbl">Contributions in</span>'+
-        '<span class="pool-stat-val">'+money(poolIn)+'</span>'+
-      '</div>'+
-      '<div class="pool-stat-row">'+
-        '<span class="pool-stat-lbl">Spent out</span>'+
-        '<span class="pool-stat-val">'+money(poolOut)+'</span>'+
-      '</div>'+
-      '<div class="pool-stat-row big '+balCls+'">'+
+      '</div>';
+
+    // --- Prepayments breakdown ---
+    body += '<div class="pool-section-title">Prepayments</div>';
+    var contribList = Object.keys(contribByDir).map(function(id){
+      var mm = memberById[id];
+      return { name: mm?displayName(mm):'Unknown', amount: contribByDir[id] };
+    }).sort(function(a,b){ return b.amount - a.amount; });
+    if(contribList.length === 0){
+      body += '<div class="pool-empty">No pre-payments yet.</div>';
+    }else{
+      contribList.forEach(function(row){
+        body += '<div class="pool-line">'+
+          '<span class="pool-line-name">'+esc(row.name)+'</span>'+
+          '<span class="pool-line-amt">'+money(row.amount)+'</span>'+
+          '</div>';
+      });
+      body += '<div class="pool-line pool-line-total">'+
+        '<span class="pool-line-name">Total in</span>'+
+        '<span class="pool-line-amt">'+money(poolIn)+'</span>'+
+        '</div>';
+    }
+
+    // --- Spent out (all expenses, sorted by amount desc) ---
+    body += '<div class="pool-section-title">Spent out</div>';
+    var spentList = Object.keys(spentByDir).map(function(id){
+      var mm = memberById[id];
+      return {
+        name: mm?displayName(mm):'Unknown',
+        amount: spentByDir[id],
+        isTreasurer: (id === s.treasurer_directory_id)
+      };
+    }).sort(function(a,b){
+      // Treasurer first, then others by amount desc.
+      if(a.isTreasurer !== b.isTreasurer) return a.isTreasurer ? -1 : 1;
+      return b.amount - a.amount;
+    });
+    if(spentList.length === 0){
+      body += '<div class="pool-empty">No expenses yet.</div>';
+    }else{
+      spentList.forEach(function(row){
+        body += '<div class="pool-line">'+
+          '<span class="pool-line-name">'+esc(row.name)+
+            (row.isTreasurer?' <span class="pico treasurer">Treasurer</span>':'')+
+            '</span>'+
+          '<span class="pool-line-amt">'+money(row.amount)+'</span>'+
+          '</div>';
+      });
+      body += '<div class="pool-line pool-line-total">'+
+        '<span class="pool-line-name">Total out</span>'+
+        '<span class="pool-line-amt">'+money(poolOut)+'</span>'+
+        '</div>';
+    }
+
+    // --- Final balance ---
+    var balCls = (poolBalance > 0.005) ? 'pool-positive'
+               : (poolBalance < -0.005) ? 'pool-negative' : '';
+    var balLbl = 'Pool Balance';
+    body +=
+      '<div class="pool-stat-row big '+balCls+'" style="margin-top:14px;">'+
         '<span class="pool-stat-lbl">'+esc(balLbl)+'</span>'+
-        '<span class="pool-stat-val">'+money(Math.abs(poolBal))+'</span>'+
+        '<span class="pool-stat-val">'+
+          (poolBalance < -0.005 ? '−' : '')+
+          money(Math.abs(poolBalance))+'</span>'+
       '</div>';
   }
   if(canChange){
