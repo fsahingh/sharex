@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.0">
+<meta name="app-version" content="V2-6.1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -417,6 +417,51 @@
     flex-shrink:0;}
 
   /* Rows inside the expanded Pre-payments group card. */
+  /* Pool card on the Settlement summary. */
+  .ss-pool .ss-val.pool-positive{color:var(--c-success);}
+  .ss-pool .ss-val.pool-negative{color:var(--c-danger);}
+  .ss-pool-sub{font-size:10px;font-weight:600;color:var(--c-text-3);
+    margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ss-pool-empty .ss-pool-empty-text{font-size:13px;font-weight:600;
+    color:var(--c-tint);margin-top:2px;}
+  .ss-pool-disabled{opacity:0.4;}
+  .ss-pool-disabled .ss-pool-empty-text{font-size:18px;color:var(--c-text-3);}
+
+  /* Pool modal stat rows. */
+  .pool-stat-row{display:flex;justify-content:space-between;align-items:center;
+    padding:11px 0;border-bottom:0.5px solid var(--c-border);font-size:14px;}
+  .pool-stat-row:last-child{border-bottom:none;}
+  .pool-stat-row.big{margin-top:8px;padding:14px 12px;border-radius:var(--r-sm);
+    border-bottom:none;font-weight:700;background:var(--c-tint-bg);color:var(--c-tint);}
+  .pool-stat-row.big.pool-positive{background:rgba(48,209,88,0.12);color:var(--c-success);}
+  .pool-stat-row.big.pool-negative{background:rgba(255,69,58,0.12);color:var(--c-danger);}
+  .pool-stat-lbl{font-size:13px;color:var(--c-text-2);}
+  .pool-stat-row.big .pool-stat-lbl{font-size:14px;color:inherit;}
+  .pool-stat-val{font-size:15px;font-weight:700;}
+  .pool-stat-row.big .pool-stat-val{font-size:18px;}
+
+  /* Treasurer picker rows. */
+  .trs-row{display:flex;align-items:center;gap:12px;padding:11px 12px;
+    background:var(--c-card);border-radius:var(--r-sm);margin-bottom:6px;
+    cursor:pointer;border:1px solid var(--c-border);min-width:0;}
+  .trs-row input[type="radio"]{flex-shrink:0;width:18px;height:18px;
+    accent-color:var(--c-tint);margin:0;}
+  .trs-row:has(input:checked){border-color:var(--c-tint);background:var(--c-tint-bg);}
+  .trs-name{flex:1;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+
+  /* Treasurer badge in People sekmesi + balance list. */
+  .pico.treasurer{background:rgba(48,209,88,0.15);color:var(--c-success);}
+
+  /* New Trip modal — treasury toggle row */
+  .nt-treasury-row{display:flex;align-items:flex-start;gap:12px;padding:12px;
+    background:var(--c-bg);border:1px solid var(--c-border);border-radius:var(--r-sm);
+    cursor:pointer;}
+  .nt-treasury-row input[type="checkbox"]{flex-shrink:0;width:20px;height:20px;
+    accent-color:var(--c-tint);margin:0;margin-top:2px;}
+  .nt-treasury-info{flex:1;min-width:0;}
+  .nt-treasury-title{font-size:14px;font-weight:600;color:var(--c-text);}
+  .nt-treasury-sub{font-size:12px;color:var(--c-text-2);margin-top:3px;line-height:1.4;}
+
   .pre-line{display:flex;align-items:center;gap:10px;padding:10px 0;
     border-bottom:0.5px solid var(--c-border);min-width:0;}
   .pre-line:last-child{border-bottom:none;}
@@ -864,6 +909,35 @@
   </div>
 </div>
 
+<!-- ======================= POOL DETAILS MODAL ======================= -->
+<!-- Shows in/out/balance for the trip's pool and lets the admin change
+     (or set) the treasurer. -->
+<div class="modal" id="modal-pool" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-width:420px;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Pool</div>
+    <div class="modal-body" id="pool-body" style="min-height:140px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="pool-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= CHANGE TREASURER MODAL ======================= -->
+<div class="modal" id="modal-treasurer" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-width:420px;">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="trs-title">Set treasurer</div>
+    <div class="modal-body" id="trs-body" style="min-height:140px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="trs-cancel">Cancel</button>
+      <button class="btn btn-primary" id="trs-save" disabled>Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= SHARE SETTLEMENT MODAL ======================= -->
 <!-- Used on settled trips. Admin picks recipients and the app sends each
      of them a personalized email summary of their balance/transfers. -->
@@ -960,10 +1034,14 @@
       <input type="number" id="ex-amount" class="field" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00">
       <label for="ex-paid-by" id="ex-paid-by-label">Paid by</label>
       <select id="ex-paid-by" class="field"></select>
-      <!-- Pre-payment only: who received the money. -->
+      <!-- Pre-payment only: goes to the pool (treasurer). Display-only. -->
       <div id="ex-paid-to-wrap" hidden>
-        <label for="ex-paid-to" style="margin-top:14px;">Paid to</label>
-        <select id="ex-paid-to" class="field"></select>
+        <div id="ex-pool-info" style="margin-top:14px;padding:11px 12px;
+          background:var(--c-tint-bg);color:var(--c-tint);border-radius:var(--r-sm);
+          font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 2"/></svg>
+          <span id="ex-pool-info-text">Goes to Pool</span>
+        </div>
       </div>
       <!-- Expense only: split selection. Hidden for prepayments. -->
       <div id="ex-split-wrap">
@@ -995,6 +1073,15 @@
     <div class="modal-body">
       <label for="nt-name">Trip name</label>
       <input type="text" id="nt-name" class="field" placeholder="e.g. Weekend in Lisbon" maxlength="60">
+      <!-- Treasury toggle: opt-in. When on, the creator becomes the
+           default treasurer; they can transfer it later from Settlement → Pool. -->
+      <label class="nt-treasury-row" style="margin-top:16px;">
+        <input type="checkbox" id="nt-with-treasury">
+        <div class="nt-treasury-info">
+          <div class="nt-treasury-title">Enable pool</div>
+          <div class="nt-treasury-sub">Track pre-payments and shared expenses through a pool managed by a treasurer. You can change the treasurer later.</div>
+        </div>
+      </label>
       <div class="msg" id="nt-msg"></div>
       <div style="font-size:13px;color:var(--c-text-2);margin-top:14px;line-height:1.5;">
         You'll be the trip admin. Add people and expenses once it's created.
@@ -1055,7 +1142,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.0';
+var APP_VERSION = 'V2-6.1';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1936,6 +2023,7 @@ function renderPeopleTab(){
           '<span class="person-name">'+esc(displayName(m))+'</span>'+
           (m.is_me ? '<span class="pico me">You</span>' : '')+
           (m.is_admin ? '<span class="pico admin">Admin</span>' : '')+
+          (m.is_treasurer ? '<span class="pico treasurer">Treasurer</span>' : '')+
           (isWithdrawn ? '<span class="pico withdrew">Withdrew</span>' : '')+
           (!m.has_account ? '<span class="pico noacc">No account</span>' : '')+
         '</div>'+
@@ -2178,7 +2266,8 @@ function renderExpensesTab(){
           (canEdit?' data-edit="'+p.expense_id+'"':'')+'>'+
           '<div class="pre-line-info">'+
             '<div class="pre-line-names">'+esc(p.paid_by_name||'?')+' '+
-              '<span style="color:var(--c-text-3);">→</span> '+esc(p.paid_to_name||'?')+
+              '<span style="color:var(--c-text-3);">→</span> '+
+              '<span style="color:var(--c-tint);font-weight:700;">Pool</span>'+
             '</div>'+
             '<div class="pre-line-date">'+esc(formatBreakdownDate(p.added_at)||'')+'</div>'+
           '</div>'+
@@ -2273,17 +2362,6 @@ function openExpenseModal(expenseId, mode){
     sel.appendChild(o);
   });
 
-  // Populate Paid-to dropdown (prepayment only). Same members list.
-  var selTo = $('ex-paid-to');
-  selTo.innerHTML='';
-  var phTo=document.createElement('option');
-  phTo.value=''; phTo.textContent='— Select who received —'; selTo.appendChild(phTo);
-  (t.members||[]).forEach(function(m){
-    var o=document.createElement('option');
-    o.value=m.directory_id; o.textContent=displayName(m);
-    selTo.appendChild(o);
-  });
-
   // Build the per-person split list (custom mode)
   var splitListEl=$('ex-split-list');
   var sh='';
@@ -2299,7 +2377,6 @@ function openExpenseModal(expenseId, mode){
   // Reset fields
   $('ex-msg').className='msg';
   document.querySelector('input[name="ex-split"][value="everyone"]').checked=true;
-  $('ex-paid-to').value = '';
 
   if(expenseId){
     // EDIT mode — fill from existing expense
@@ -2316,9 +2393,6 @@ function openExpenseModal(expenseId, mode){
     $('ex-desc').value   = exp.description || '';
     $('ex-amount').value = String(exp.amount);
     $('ex-paid-by').value= exp.paid_by;
-    if(isPre){
-      $('ex-paid-to').value = exp.paid_to || '';
-    }
     applyKindLayout(state.expenseKind);
     // Split section only for expenses; prepayments don't have one.
     if(!isPre){
@@ -2373,8 +2447,15 @@ function applyKindLayout(kind){
   $('ex-desc-wrap').hidden = isPre;
   // Paid-by label changes wording slightly.
   $('ex-paid-by-label').textContent = isPre ? 'From (who paid)' : 'Paid by';
-  // Paid-to: prepayments only.
+  // Pool info banner — only for prepayments.
   $('ex-paid-to-wrap').hidden = !isPre;
+  if(isPre && state.trip){
+    var trsId = state.trip.treasurer_directory_id;
+    var trs = trsId ? (state.trip.members||[]).find(function(m){ return m.directory_id===trsId; }) : null;
+    $('ex-pool-info-text').textContent = trs
+      ? 'Goes to Pool (managed by '+displayName(trs)+')'
+      : 'Pool not set — assign a treasurer first';
+  }
   // Split section: expenses only.
   $('ex-split-wrap').hidden = isPre;
 }
@@ -2400,7 +2481,6 @@ function readExpenseForm(){
     description: $('ex-desc').value.trim(),
     amount:      $('ex-amount').value,
     paid_by:     $('ex-paid-by').value,
-    paid_to:     $('ex-paid-to').value,
     split_mode:  splitMode,
     split_ids:   splitIds
   };
@@ -2416,17 +2496,17 @@ async function saveExpense(){
 
   // ---- PRE-PAYMENT path ----
   if(f.kind === 'prepayment'){
-    if(!f.paid_by){ setMsg('Choose who paid.'); return; }
-    if(!f.paid_to){ setMsg('Choose who received the money.'); return; }
-    if(f.paid_by === f.paid_to){ setMsg('Giver and receiver must differ.'); return; }
+    if(!f.paid_by){ setMsg('Choose who is contributing.'); return; }
+    if(!state.trip.treasurer_directory_id){
+      setMsg('Pool not set — assign a treasurer first.'); return;
+    }
     btn.disabled = true;
-    btn.textContent = state.expenseEditingId ? 'Saving…' : 'Saving…';
+    btn.textContent = 'Saving…';
     try{
       if(state.expenseEditingId){
         var resu = await sb.rpc('update_prepayment', {
           p_expense: state.expenseEditingId,
           p_paid_by: f.paid_by,
-          p_paid_to: f.paid_to,
           p_amount:  amt
         });
         if(resu.error) throw resu.error;
@@ -2434,7 +2514,6 @@ async function saveExpense(){
         var resa = await sb.rpc('add_prepayment', {
           p_trip:    state.trip.trip_id,
           p_paid_by: f.paid_by,
-          p_paid_to: f.paid_to,
           p_amount:  amt
         });
         if(resa.error) throw resa.error;
@@ -2596,14 +2675,46 @@ function renderSettlementTab(){
       '</div>';
   }
 
+  // ---- Top row: Total cost | Lock | Pool ----
+  // Pool card shows the treasury balance when a treasurer is set.
+  // When not set: a placeholder card the admin can tap to enable.
+  var hasTreasurer = !!s.treasurer_directory_id;
+  var poolBalance = Number(s.pool_balance)||0;
+  var treasurerMember = hasTreasurer ? (t.members||[]).find(function(m){
+    return m.directory_id === s.treasurer_directory_id;
+  }) : null;
+  var poolHtml;
+  if(hasTreasurer){
+    var poolValCls = (poolBalance > 0.005) ? 'pool-positive'
+                    : (poolBalance < -0.005) ? 'pool-negative' : '';
+    poolHtml =
+      '<div class="ss-cell ss-pool tappable" id="ss-pool" role="button">'+
+        '<div class="ss-lbl">Pool</div>'+
+        '<div class="ss-val '+poolValCls+'">'+money(poolBalance)+'</div>'+
+        (treasurerMember
+          ? '<div class="ss-pool-sub">'+esc(displayName(treasurerMember))+'</div>'
+          : '')+
+      '</div>';
+  }else if(t.is_admin && !t.settled){
+    poolHtml =
+      '<div class="ss-cell ss-pool ss-pool-empty tappable" id="ss-pool" role="button">'+
+        '<div class="ss-lbl">Pool</div>'+
+        '<div class="ss-pool-empty-text">Not set</div>'+
+      '</div>';
+  }else{
+    poolHtml =
+      '<div class="ss-cell ss-pool ss-pool-disabled">'+
+        '<div class="ss-lbl">Pool</div>'+
+        '<div class="ss-pool-empty-text">—</div>'+
+      '</div>';
+  }
+
   h += '<div class="settle-summary">'+
     '<div class="ss-grid">'+
       '<div class="ss-cell"><div class="ss-lbl">Total cost</div>'+
         '<div class="ss-val">'+money(total)+'</div></div>'+
       centerHtml+
-      '<div class="ss-cell tappable" id="ss-perperson" role="button">'+
-        '<div class="ss-lbl">Per person</div>'+
-        '<div class="ss-val">'+money(perPerson)+'</div></div>'+
+      poolHtml+
     '</div>'+
     '</div>';
 
@@ -2668,6 +2779,7 @@ function renderSettlementTab(){
           '<div class="bal-info">'+
             '<div class="bal-name">'+esc(name)+
               (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+
+              (m && m.is_treasurer?' <span class="pico treasurer">Treasurer</span>':'')+
               (isWithdrawn?' <span class="pico withdrew">Withdrew</span>':'')+'</div>'+
             '<div class="bal-sub">paid '+money(b.paid)+' · share '+money(b.owes)+'</div>'+
           '</div>'+
@@ -2724,12 +2836,155 @@ function renderSettlementTab(){
   if(toggle) toggle.onclick = t.settled ? doUnsettle : doSettle;
   var shareBtn = $('settle-share');
   if(shareBtn) shareBtn.onclick = openShareSettlement;
-  var ppBtn = $('ss-perperson');
-  if(ppBtn) ppBtn.onclick = function(){ openBreakdown('shared'); };
   var ypBtn = $('ss-youpaid');
   if(ypBtn) ypBtn.onclick = function(){ openBreakdown('paid'); };
   var ynBtn = $('ss-yournet');
   if(ynBtn) ynBtn.onclick = function(){ openMyActivity(); };
+  var poolBtn = $('ss-pool');
+  if(poolBtn) poolBtn.onclick = openPoolModal;
+}
+
+// ============================================================
+//  POOL / TREASURER
+// ============================================================
+function openPoolModal(){
+  if(!state.trip || !state.settlement) return;
+  var s = state.settlement;
+  var t = state.trip;
+  var hasTreasurer = !!s.treasurer_directory_id;
+  var canChange = t.is_admin && !t.settled;
+  openModal('modal-pool');
+  var body = '';
+  if(!hasTreasurer){
+    body += '<div style="font-size:14px;line-height:1.5;color:var(--c-text);">'+
+      'No treasurer is set for this trip. Set one to start tracking pre-payments '+
+      'into a shared pool.</div>';
+  }else{
+    var member = (t.members||[]).find(function(m){
+      return m.directory_id === s.treasurer_directory_id;
+    });
+    var nm = member ? displayName(member) : 'Unknown';
+    var poolIn  = Number(s.pool_in)  || 0;
+    var poolOut = Number(s.pool_out) || 0;
+    var poolBal = Number(s.pool_balance) || 0;
+    var balCls = (poolBal > 0.005) ? 'pool-positive'
+               : (poolBal < -0.005) ? 'pool-negative' : '';
+    var balLbl = (poolBal > 0.005) ? 'Available in pool'
+               : (poolBal < -0.005) ? 'Treasurer over-paid'
+               : 'Pool empty';
+    body +=
+      '<div class="pool-stat-row">'+
+        '<span class="pool-stat-lbl">Treasurer</span>'+
+        '<span class="pool-stat-val">'+esc(nm)+'</span>'+
+      '</div>'+
+      '<div class="pool-stat-row">'+
+        '<span class="pool-stat-lbl">Contributions in</span>'+
+        '<span class="pool-stat-val">'+money(poolIn)+'</span>'+
+      '</div>'+
+      '<div class="pool-stat-row">'+
+        '<span class="pool-stat-lbl">Spent out</span>'+
+        '<span class="pool-stat-val">'+money(poolOut)+'</span>'+
+      '</div>'+
+      '<div class="pool-stat-row big '+balCls+'">'+
+        '<span class="pool-stat-lbl">'+esc(balLbl)+'</span>'+
+        '<span class="pool-stat-val">'+money(Math.abs(poolBal))+'</span>'+
+      '</div>';
+  }
+  if(canChange){
+    body += '<button class="btn btn-secondary" id="pool-change-treasurer" '+
+      'style="margin-top:16px;display:flex;align-items:center;justify-content:center;gap:8px;">'+
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
+      '<span>'+(hasTreasurer?'Change treasurer':'Set treasurer')+'</span>'+
+      '</button>';
+    // Remove option only valid when no prepayments exist.
+    if(hasTreasurer){
+      var hasPrepay = (state.expenses||[]).some(function(e){ return e.kind === 'prepayment'; });
+      if(!hasPrepay){
+        body += '<button class="btn btn-secondary" id="pool-remove-treasurer" '+
+          'style="margin-top:8px;background:rgba(255,59,48,0.10);color:var(--c-danger);'+
+          'border-color:transparent;">Remove treasurer (disable pool)</button>';
+      }
+    }
+  }
+  $('pool-body').innerHTML = body;
+  var btn1 = $('pool-change-treasurer');
+  if(btn1) btn1.onclick = function(){ closeModal('modal-pool'); openTreasurerModal(); };
+  var btn2 = $('pool-remove-treasurer');
+  if(btn2) btn2.onclick = doRemoveTreasurer;
+}
+
+function openTreasurerModal(){
+  if(!state.trip) return;
+  var t = state.trip;
+  $('trs-title').textContent = t.treasurer_directory_id ? 'Change treasurer' : 'Set treasurer';
+  // Only active (non-withdrawn, non-self also fine) members are eligible.
+  var eligible = (t.members||[]).filter(function(m){ return !m.withdrew_at; });
+  var current = t.treasurer_directory_id;
+  var body = '<div style="font-size:12.5px;color:var(--c-text-2);margin-bottom:10px;line-height:1.45;">'+
+    'The treasurer manages the pool: pre-payments go to them, and their '+
+    'expenses are spent from the pool first.</div>';
+  if(eligible.length === 0){
+    body += '<div class="empty"><div class="empty-sub">No eligible members.</div></div>';
+  }else{
+    eligible.forEach(function(m){
+      var checked = (m.directory_id === current) ? ' checked' : '';
+      body += '<label class="trs-row">'+
+        '<input type="radio" name="trs-pick" value="'+m.directory_id+'"'+checked+'>'+
+        '<div class="person-avatar" style="width:30px;height:30px;font-size:12px;">'+
+          esc(initials(m))+'</div>'+
+        '<div class="trs-name">'+esc(displayName(m))+
+          (m.is_me ? ' <span class="pico me">You</span>' : '')+
+          (m.is_admin ? ' <span class="pico admin">Admin</span>' : '')+'</div>'+
+        '</label>';
+    });
+  }
+  $('trs-body').innerHTML = body;
+  $('trs-save').disabled = true;
+  $('trs-save').textContent = current ? 'Change' : 'Set';
+  $('trs-body').addEventListener('change', function(){
+    var picked = $('trs-body').querySelector('input[name="trs-pick"]:checked');
+    $('trs-save').disabled = !picked || (picked && picked.value === current);
+  });
+  openModal('modal-treasurer');
+}
+
+async function saveTreasurer(){
+  var picked = $('trs-body').querySelector('input[name="trs-pick"]:checked');
+  if(!picked) return;
+  var btn = $('trs-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var res = await sb.rpc('set_trip_treasurer', {
+      p_trip: state.trip.trip_id, p_dir: picked.value
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-treasurer');
+    toast('Treasurer set');
+    state.settlementLoadedFor = null;
+    state.expensesLoadedFor = null;
+    await reloadTrip();
+  }catch(err){
+    btn.disabled = false; btn.textContent = 'Save';
+    toast(err.message || 'Could not save', true);
+  }
+}
+
+async function doRemoveTreasurer(){
+  if(!await alertModal('Remove the treasurer? This disables the Pool for this trip. '+
+       'Only allowed when there are no pre-payments.',
+       { confirm:true, danger:true, confirmLabel:'Remove' })) return;
+  try{
+    var res = await sb.rpc('set_trip_treasurer', {
+      p_trip: state.trip.trip_id, p_dir: null
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-pool');
+    toast('Treasurer removed');
+    state.settlementLoadedFor = null;
+    await reloadTrip();
+  }catch(err){
+    toast(err.message || 'Could not remove', true);
+  }
 }
 
 async function doSettle(){
@@ -3070,6 +3325,7 @@ function applyExpensePicker(){
 // ---- New trip ----
 function openNewTrip(){
   $('nt-name').value='';
+  $('nt-with-treasury').checked = false;
   $('nt-msg').className='msg';
   openModal('modal-new-trip');
   setTimeout(function(){ $('nt-name').focus(); },150);
@@ -3083,7 +3339,10 @@ async function createTrip(){
   }
   overlay('Creating trip…');
   try{
-    var res=await sb.rpc('create_trip',{ p_name:name });
+    var res=await sb.rpc('create_trip',{
+      p_name: name,
+      p_with_treasury: $('nt-with-treasury').checked
+    });
     if(res.error) throw res.error;
     closeModal('modal-new-trip');
     overlayOff();
@@ -4594,7 +4853,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown'].forEach(function(id){
+['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
@@ -4614,7 +4873,7 @@ document.querySelectorAll('#ex-kind-tabs .kind-tab').forEach(function(tab){
   };
 });
 // In edit mode, the Save button stays disabled until the form really changes.
-['ex-desc','ex-amount','ex-paid-by','ex-paid-to'].forEach(function(id){
+['ex-desc','ex-amount','ex-paid-by'].forEach(function(id){
   $(id).addEventListener('input', checkExpenseChanged);
   $(id).addEventListener('change', checkExpenseChanged);
 });
@@ -4662,6 +4921,10 @@ $('share-cancel').onclick = function(){ closeModal('modal-share'); };
 $('share-send').onclick = doShareSend;
 // Breakdown modal
 $('bd-close').onclick = function(){ closeModal('modal-breakdown'); };
+// Pool / treasurer modals
+$('pool-close').onclick = function(){ closeModal('modal-pool'); };
+$('trs-cancel').onclick = function(){ closeModal('modal-treasurer'); };
+$('trs-save').onclick = saveTreasurer;
 $('ap-search').addEventListener('input', function(){
   // Typing in search clears any previous directory pick
   $('ap-results').dataset.pickedDir = '';
