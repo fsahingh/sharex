@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.1">
+<meta name="app-version" content="V2-7.2">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1206,6 +1206,9 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Deploy-specific configuration (Supabase + Apps Script). Loaded before
+     the app so window.SHARED_EXPENSES_CONFIG is ready. See config.sample.js. -->
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
@@ -1214,7 +1217,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.1';
+var APP_VERSION = 'V2-7.2';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1271,16 +1274,39 @@ document.addEventListener('visibilitychange', function(){
 });
 // Plus a slow timer for tabs that stay visible all day.
 setInterval(function(){ checkForNewVersion(false); }, 15 * 60 * 1000);
-var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
-var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
+// ---- Runtime configuration ----
+// Backend + mail credentials are loaded from config.js (see config.sample.js),
+// which sets window.SHARED_EXPENSES_CONFIG before this script runs. Keeping
+// them out of index.html means deploy-specific values live in one place and
+// don't clutter the app source. NOTE: because this is a static site, these
+// values still reach the browser — the Supabase anon key is protected by RLS,
+// and the Apps Script token is only a light speed-bump, not real security.
+var CFG = (window.SHARED_EXPENSES_CONFIG || {});
+if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){
+  // Fail loudly so a missing/!misconfigured config.js is obvious rather than
+  // producing confusing downstream errors.
+  document.addEventListener('DOMContentLoaded', function(){
+    document.body.innerHTML =
+      '<div style="font-family:-apple-system,sans-serif;max-width:480px;margin:60px auto;'+
+      'padding:24px;text-align:center;color:#1c1c1e;">'+
+      '<h2 style="color:#ff453a;">Configuration missing</h2>'+
+      '<p style="line-height:1.5;color:#3a3a3c;">This app needs a <code>config.js</code> file '+
+      'next to <code>index.html</code>. Copy <code>config.sample.js</code> to '+
+      '<code>config.js</code> and fill in your Supabase and Apps Script values.</p>'+
+      '</div>';
+  });
+  throw new Error('SHARED_EXPENSES_CONFIG is missing or incomplete.');
+}
+var SUPABASE_URL = CFG.supabaseUrl;
+var SUPABASE_ANON_KEY = CFG.supabaseAnonKey;
 
 // Apps Script Web App URL — receives POSTs and sends HTML emails through
 // the deployer's Gmail. Configured in mail-proxy.gs. The token is a weak
 // "secret" shared between this client and that script; users can read it
 // from the page source, so don't treat it as real security — it's just a
 // speed bump against random scrapers hitting the URL.
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwd3vf7bohnPBKhBihPt44RfRaFogNhwHfmB5KSTiw08kpQvhvygrAWbQtFl8kNNrF7FQ/exec';
-var APPS_SCRIPT_TOKEN = '12lknds9wrlknds0w3rnlewkfn203rhnewlkn120921hnwlfk';
+var APPS_SCRIPT_URL = CFG.appsScriptUrl || '';
+var APPS_SCRIPT_TOKEN = CFG.appsScriptToken || '';
 
 // persistSession keeps the login token in localStorage so closing and
 // reopening the page does NOT require signing in again. autoRefreshToken
