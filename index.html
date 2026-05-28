@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.2">
+<meta name="app-version" content="V2-7.3">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1217,7 +1217,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.2';
+var APP_VERSION = 'V2-7.3';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2884,14 +2884,17 @@ function renderSettlementTab(){
     var ncls = (Math.abs(n) < 0.005) ? 'even' : (n>0 ? 'owed' : 'owe');
     var nlbl = (Math.abs(n) < 0.005) ? 'You\'re even' :
                (n>0 ? 'You\'re owed' : 'You owe');
-    // "You paid" should NOT include the forfeit credit (the breakdown
-    // modal shows it as a separate group). Subtract it back out so the
-    // top-line card matches what the breakdown adds up to before forfeit.
-    var youPaidRaw = Number(myBal.paid) || 0;
-    if(!myBal.withdrew && Number(s.active_count) > 0){
-      var myCredit = (Number(s.forfeit_pool) || 0) / Number(s.active_count);
-      youPaidRaw -= myCredit;
-    }
+    // "You paid" = what actually left your pocket: real expenses you paid
+    // PLUS pre-payments you put into the pool. We do NOT subtract pool money
+    // received (that matters for the net balance, not for "what you paid"),
+    // and we do NOT add the forfeit credit (shown separately in breakdowns).
+    // Computed from state.expenses so the treasurer — who receives the whole
+    // pool — still shows their true physical spend rather than a net figure.
+    var youPaidRaw = 0;
+    (state.expenses||[]).forEach(function(e){
+      if(e.paid_by !== myDirId) return;
+      youPaidRaw += Number(e.amount) || 0;  // both real expenses and prepayments
+    });
     var yourShare = Number(myBal.owes) || 0;
     // Three equal cards in one row: You paid | Your Share | Your net.
     // Each is independently tappable and opens its respective modal.
