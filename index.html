@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.0">
+<meta name="app-version" content="V2-7.1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1214,7 +1214,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.0';
+var APP_VERSION = 'V2-7.1';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4569,19 +4569,36 @@ async function doShareSend(){
     // Apps Script's CORS quirk: it only returns Access-Control-Allow-Origin:*
     // when the request doesn't have custom headers, so we send a plain
     // text/plain body and let the script JSON.parse it.
-    var resp = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      // text/plain dodges CORS preflight; Apps Script accepts the raw text
-      // and we parse it server-side.
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        token: APPS_SCRIPT_TOKEN,
-        action: 'send_settlement',
-        report: r,
-        recipient_directory_ids: dirIds
-      })
-    });
-    var data = await resp.json();
+    var resp;
+    try{
+      resp = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        redirect: 'follow',
+        // text/plain dodges CORS preflight; Apps Script accepts the raw text
+        // and we parse it server-side.
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          token: APPS_SCRIPT_TOKEN,
+          action: 'send_settlement',
+          report: r,
+          recipient_directory_ids: dirIds
+        })
+      });
+    }catch(netErr){
+      // "Failed to fetch" lands here — the request never completed (network,
+      // CORS, or the Apps Script deployment URL is unreachable / changed).
+      throw new Error('Network error reaching the email service. '+
+        'Check your connection and that the Apps Script URL is still valid.');
+    }
+    var raw = await resp.text();
+    var data;
+    try{ data = JSON.parse(raw); }
+    catch(parseErr){
+      // Apps Script returned HTML (e.g. an auth/login or error page) instead
+      // of JSON — usually means the deployment needs re-authorizing.
+      throw new Error('Email service returned an unexpected response '+
+        '(status '+resp.status+'). The Apps Script deployment may need to be redeployed.');
+    }
     if(data.error) throw new Error(data.error);
     var sent = data.sent || 0;
     var failed = data.failed || 0;
