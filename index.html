@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.4">
+<meta name="app-version" content="V2-6.5">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1167,7 +1167,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.4';
+var APP_VERSION = 'V2-6.5';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3027,22 +3027,13 @@ function openPoolModal(){
         '<span class="pool-stat-val">'+esc(nm)+'</span>'+
       '</div>';
 
-    // --- Prepayments breakdown ---
+    // --- Prepayments — total only (per-person detail is omitted to
+    // keep the focus on what came in vs. what was spent). ---
     body += '<div class="pool-section-title">Prepayments</div>';
-    var contribList = Object.keys(contribByDir).map(function(id){
-      var mm = memberById[id];
-      return { name: mm?displayName(mm):'Unknown', amount: contribByDir[id] };
-    }).sort(function(a,b){ return b.amount - a.amount; });
-    if(contribList.length === 0){
+    if(poolIn < 0.005){
       body += '<div class="pool-empty">No pre-payments yet.</div>';
     }else{
-      contribList.forEach(function(row){
-        body += '<div class="pool-line">'+
-          '<span class="pool-line-name">'+esc(row.name)+'</span>'+
-          '<span class="pool-line-amt">'+money(row.amount)+'</span>'+
-          '</div>';
-      });
-      body += '<div class="pool-line pool-line-total">'+
+      body += '<div class="pool-line pool-line-total" style="border-top:none;">'+
         '<span class="pool-line-name">Total in</span>'+
         '<span class="pool-line-amt">'+money(poolIn)+'</span>'+
         '</div>';
