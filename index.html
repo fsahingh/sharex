@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.5">
+<meta name="app-version" content="V2-6.6">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -306,6 +306,18 @@
   .my-amt{font-size:22px;font-weight:700;margin-top:3px;}
   .my-card.owed .my-amt{color:var(--c-success);}
   .my-card.owe  .my-amt{color:var(--c-danger);}
+  /* Split variant — two halves divided by a thin line. Each half is a
+     button so they're individually tappable. Labels and amounts line up
+     vertically across the two halves because they share the same row. */
+  .my-card-split{padding:0;display:grid;grid-template-columns:1fr 1fr;
+    align-items:stretch;}
+  .my-half{padding:14px 12px;text-align:center;background:transparent;border:none;
+    color:inherit;font-family:inherit;cursor:pointer;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;
+    min-width:0;}
+  .my-half + .my-half{border-left:0.5px solid var(--c-border);}
+  .my-half:active{background:var(--c-bg);}
+  .my-half .my-amt{font-size:20px;}
 
   .balance-list{background:var(--c-card);border-radius:var(--r);overflow:hidden;
     box-shadow:var(--shadow);}
@@ -315,6 +327,9 @@
   .bal-info{flex:1;min-width:0;}
   .bal-name{font-size:14px;font-weight:600;}
   .bal-sub{font-size:11px;color:var(--c-text-2);margin-top:1px;}
+  /* Each "Label $X" pair stays together when the breakdown line wraps. */
+  .bal-sub-group{display:inline-block;white-space:nowrap;}
+  .bal-sub-sep{color:var(--c-text-3);}
   /* Plain-grey explanation line under a treasurer's balance row.
      Renders directly under bal-sub; only shown for the treasurer. */
   .bal-treasurer-note{font-size:11px;color:var(--c-text-3);margin-top:2px;
@@ -540,9 +555,14 @@
     background:var(--c-bg);border:1px solid var(--c-border);
     font-size:15px;font-weight:700;color:var(--c-text);
     font-family:inherit;cursor:pointer;
-    max-width:60%;}
+    /* Header has icons on both sides. Left: 1 icon (~46px incl. padding).
+       Right: up to 3 icons (~140px). Reserve 160px on each side from
+       the centered card so it can never visually collide with them. */
+    max-width:calc(100% - 320px);
+    min-width:0;}
   .td-name-card:active{transform:translate(-50%,-50%) scale(0.97);}
-  .td-name-card #td-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .td-name-card #td-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    min-width:0;}
 
   /* ---- EDIT PERSON: trips list ---- */
   .ep-trip-row{display:flex;align-items:center;justify-content:space-between;
@@ -1167,7 +1187,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.5';
+var APP_VERSION = 'V2-6.6';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2795,10 +2815,21 @@ function renderSettlementTab(){
       var myCredit = (Number(s.forfeit_pool) || 0) / Number(s.active_count);
       youPaidRaw -= myCredit;
     }
+    var yourShare = Number(myBal.owes) || 0;
+    // Two-pane card on the left (You paid | Your Share), Your net on right.
+    // The two halves share a divider so the labels and amounts line up
+    // vertically without any extra rules.
     h += '<div class="my-row">'+
-      '<div class="my-card tappable" id="ss-youpaid" role="button">'+
-        '<div class="my-lbl">You paid</div>'+
-        '<div class="my-amt">'+money(youPaidRaw)+'</div></div>'+
+      '<div class="my-card my-card-split">'+
+        '<button class="my-half tappable" id="ss-youpaid" type="button">'+
+          '<div class="my-lbl">You paid</div>'+
+          '<div class="my-amt">'+money(youPaidRaw)+'</div>'+
+        '</button>'+
+        '<button class="my-half tappable" id="ss-yourshare" type="button">'+
+          '<div class="my-lbl">Your Share</div>'+
+          '<div class="my-amt">'+money(yourShare)+'</div>'+
+        '</button>'+
+      '</div>'+
       '<div class="my-card '+ncls+' tappable" id="ss-yournet" role="button">'+
         '<div class="my-lbl">'+nlbl+'</div>'+
         '<div class="my-amt">'+money(Math.abs(n))+'</div></div>'+
@@ -2876,6 +2907,9 @@ function renderSettlementTab(){
           forfeitNote = '<div class="bal-forfeit-note">'+money(rawNet)+' forfeited</div>';
         }
         // Build the breakdown sub-line: "Prepay $X · Expense $Y · Share $Z[ · Forfeit $W]"
+        // Each group is wrapped in its own nowrap span so when the row
+        // gets too narrow, only whole groups (label + amount) wrap to
+        // the next line — never the amount alone.
         var ps = stats[b.directory_id] || { prepay:0, expense:0, share:0 };
         var myForfeit = isWithdrawn ? 0 : perActiveCredit;
         var subParts = [
@@ -2884,6 +2918,10 @@ function renderSettlementTab(){
           'Share '+money(ps.share)
         ];
         if(myForfeit > 0.005) subParts.push('Forfeit +'+money(myForfeit));
+        var subHtml = subParts.map(function(p, i){
+          return '<span class="bal-sub-group">'+esc(p)+'</span>'+
+            (i < subParts.length - 1 ? '<span class="bal-sub-sep"> · </span>' : '');
+        }).join('');
         // Treasurer-only note: the treasurer's net is the sum of two
         // amounts — the surplus they still hold as cash on behalf of
         // the group, and their own out-of-pocket personal share.
@@ -2916,7 +2954,7 @@ function renderSettlementTab(){
               (b.directory_id===myDirId?' <span class="pico me">You</span>':'')+
               (m && m.is_treasurer?' <span class="pico treasurer">Treasurer</span>':'')+
               (isWithdrawn?' <span class="pico withdrew">Withdrew</span>':'')+'</div>'+
-            '<div class="bal-sub">'+subParts.join(' · ')+'</div>'+
+            '<div class="bal-sub">'+subHtml+'</div>'+
             treasurerNote+
           '</div>'+
           '<div class="bal-right">'+
@@ -2974,8 +3012,10 @@ function renderSettlementTab(){
   if(shareBtn) shareBtn.onclick = openShareSettlement;
   var ypBtn = $('ss-youpaid');
   if(ypBtn) ypBtn.onclick = function(){ openBreakdown('paid'); };
+  var ysBtn = $('ss-yourshare');
+  if(ysBtn) ysBtn.onclick = function(){ openBreakdown('shared'); };
   var ynBtn = $('ss-yournet');
-  if(ynBtn) ynBtn.onclick = function(){ openMyActivity(); };
+  if(ynBtn) ynBtn.onclick = openMyActivity;
   var poolBtn = $('ss-pool');
   if(poolBtn) poolBtn.onclick = openPoolModal;
 }
