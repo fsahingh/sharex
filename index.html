@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.6">
+<meta name="app-version" content="V2-6.7">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -411,6 +411,16 @@
   .bd-group-total{font-size:13px;font-weight:700;}
   .bd-group-total.plus{color:var(--c-success);}
   .bd-group-total.minus{color:var(--c-danger);}
+  /* Collapsible variant of bd-group-head — used by "Your share of expenses"
+     which can be a long list. Renders as a button row that's full-width
+     and tappable, with a chevron that rotates on open. */
+  .bd-group-head-btn{background:transparent;border:none;font:inherit;color:inherit;
+    width:100%;cursor:pointer;padding:0;text-align:left;}
+  .bd-group-head-btn:active{opacity:0.7;}
+  .bd-share-right{display:flex;align-items:center;gap:8px;}
+  .bd-share-chevron{display:inline-flex;color:var(--c-text-3);
+    transition:transform 0.18s ease;}
+  .bd-share-chevron.open{transform:rotate(180deg);}
   .bd-net{display:flex;justify-content:space-between;align-items:center;
     margin-top:18px;padding:16px 14px;border-radius:var(--r-sm);font-weight:700;}
   .bd-net.plus{background:rgba(48,209,88,0.12);color:var(--c-success);}
@@ -1187,7 +1197,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.6';
+var APP_VERSION = 'V2-6.7';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4314,17 +4324,30 @@ async function openMyActivity(){
   openModal('modal-breakdown');
   $('bd-title').textContent = 'Your activity';
   $('bd-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  // "Your share of expenses" starts collapsed every time the modal opens.
+  state.bdShareOpen = false;
   try{
     var res = await sb.rpc('get_my_settlement_breakdown', { p_trip: state.trip.trip_id });
     if(res.error) throw res.error;
-    var data = res.data || {};
-    var paidRows     = data.paid || [];   // mix of expense + prepayment-given
-    var sharedRows   = data.shared || [];
-    var receivedRows = data.prepay_received || [];
+    // Cache so the share toggle can re-render without another RPC call.
+    state.bdData = res.data || {};
+    renderMyActivity();
+  }catch(err){
+    $('bd-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
 
-    // Split "paid" into two semantic groups for clearer presentation.
-    var paidExpense = paidRows.filter(function(r){ return r.kind !== 'prepayment'; });
-    var paidPrepay  = paidRows.filter(function(r){ return r.kind === 'prepayment'; });
+function renderMyActivity(){
+  var data = state.bdData || {};
+  var paidRows     = data.paid || [];   // mix of expense + prepayment-given
+  var sharedRows   = data.shared || [];
+  var receivedRows = data.prepay_received || [];
+
+  // Split "paid" into two semantic groups for clearer presentation.
+  var paidExpense = paidRows.filter(function(r){ return r.kind !== 'prepayment'; });
+  var paidPrepay  = paidRows.filter(function(r){ return r.kind === 'prepayment'; });
 
     // Per-group totals.
     var sumPaidExp = paidExpense.reduce(function(a,r){ return a + (Number(r.amount)||0); }, 0);
@@ -4404,18 +4427,36 @@ async function openMyActivity(){
         '</div>';
     }
 
-    // Group 4 — Your share of expenses
-    renderGroup('Your share of expenses', sharedRows, 'minus', sumShare, function(r){
-      return '<div class="bd-row">'+
-        '<div class="bd-info">'+
-          '<div class="bd-desc">'+esc(r.description||'(no description)')+'</div>'+
-          (formatBreakdownDate(r.created_at)
-            ? '<div class="bd-date">'+esc(formatBreakdownDate(r.created_at))+'</div>' : '')+
-        '</div>'+
-        '<div class="bd-amount">'+money(Number(r.my_share)||0)+
-          '<div class="bd-sub">of '+money(Number(r.amount)||0)+'</div></div>'+
-        '</div>';
-    });
+    // Group 4 — Your share of expenses (COLLAPSIBLE)
+    // The list can get long when a trip has many expenses, so this group
+    // starts collapsed: header (title + total) only. Tap it to expand.
+    if(sharedRows.length > 0){
+      var shareOpen = (state.bdShareOpen === true);
+      h += '<div class="bd-group bd-group-collapsible">'+
+        '<button class="bd-group-head bd-group-head-btn" type="button" id="bd-share-toggle">'+
+          '<span class="bd-group-title">Your share of expenses</span>'+
+          '<span class="bd-share-right">'+
+            '<span class="bd-group-total minus">−'+money(sumShare).replace('-','')+'</span>'+
+            '<span class="bd-share-chevron'+(shareOpen?' open':'')+'">'+
+              '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'+
+            '</span>'+
+          '</span>'+
+        '</button>';
+      if(shareOpen){
+        sharedRows.forEach(function(r){
+          h += '<div class="bd-row">'+
+            '<div class="bd-info">'+
+              '<div class="bd-desc">'+esc(r.description||'(no description)')+'</div>'+
+              (formatBreakdownDate(r.created_at)
+                ? '<div class="bd-date">'+esc(formatBreakdownDate(r.created_at))+'</div>' : '')+
+            '</div>'+
+            '<div class="bd-amount">'+money(Number(r.my_share)||0)+
+              '<div class="bd-sub">of '+money(Number(r.amount)||0)+'</div></div>'+
+            '</div>';
+        });
+      }
+      h += '</div>';
+    }
 
     // Group 5 — Pre-payments to me
     renderGroup('Pre-payments to you', receivedRows, 'minus', sumRecv, function(r){
@@ -4442,11 +4483,14 @@ async function openMyActivity(){
       '<span class="bd-net-amount">'+money(Math.abs(net))+'</span>'+
       '</div>';
 
-    $('bd-body').innerHTML = h;
-  }catch(err){
-    $('bd-body').innerHTML =
-      '<div class="empty"><div class="empty-title">Could not load</div>'+
-      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  $('bd-body').innerHTML = h;
+  // Wire the collapsible "Your share of expenses" header toggle.
+  var shareToggle = $('bd-share-toggle');
+  if(shareToggle){
+    shareToggle.onclick = function(){
+      state.bdShareOpen = !state.bdShareOpen;
+      renderMyActivity();
+    };
   }
 }
 
