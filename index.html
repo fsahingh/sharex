@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.9">
+<meta name="app-version" content="V2-7.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1214,7 +1214,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.9';
+var APP_VERSION = 'V2-7.0';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4227,12 +4227,25 @@ function renderShareList(){
   if(!r){ return; }
   var t = state.trip;
   var myDirId = t.my_directory_id || null;
-  var members = (r.members || []).filter(function(m){
-    return m.directory_id !== myDirId;
+  // Net lookup so we can tell whether a withdrawn member is actually owed
+  // money (a creditor). Withdrawn members only get an email if we owe them.
+  var netByDir = {};
+  (r.balances || []).forEach(function(b){
+    netByDir[b.directory_id] = Number(b.net) || 0;
   });
+  // Include everyone — the current user (admin) can email themselves too.
+  var members = (r.members || []).slice();
+  // Eligibility: must have an email AND, if withdrawn, must be a creditor
+  // (net > 0). Active members with an email are always eligible.
+  function isEligible(m){
+    if(!m.email) return false;
+    if(m.withdrew && (netByDir[m.directory_id] || 0) <= 0.005) return false;
+    return true;
+  }
   members.sort(function(a,b){
-    var aHas = !!a.email, bHas = !!b.email;
-    if(aHas !== bHas) return aHas ? -1 : 1;
+    // Eligible first, then by name. Withdrawn/no-email sink to the bottom.
+    var aE = isEligible(a), bE = isEligible(b);
+    if(aE !== bE) return aE ? -1 : 1;
     return (a.display_name||'').localeCompare(b.display_name||'');
   });
   var h = '<div style="font-size:12.5px;color:var(--c-text-2);margin-bottom:10px;'+
@@ -4244,21 +4257,30 @@ function renderShareList(){
     '<button id="share-pick-none">Clear</button></div>';
   var anyEligible = false;
   members.forEach(function(m){
-    var hasEmail = !!m.email;
-    if(hasEmail) anyEligible = true;
-    h += '<label class="inv-row'+(hasEmail?'':' disabled')+'">'+
+    var eligible = isEligible(m);
+    if(eligible) anyEligible = true;
+    var isMe = (m.directory_id === myDirId);
+    // Sub-label: withdrew badge, else email, else "No email".
+    var sub;
+    if(m.withdrew){
+      sub = '<span class="pico withdrew">Withdrew</span>';
+    }else{
+      sub = '<span class="inv-email">'+(m.email ? esc(m.email) : 'No email')+'</span>';
+    }
+    h += '<label class="inv-row'+(eligible?'':' disabled')+'">'+
       '<input type="checkbox" data-mid="'+m.directory_id+'"'+
-        (hasEmail ? '' : ' disabled')+'>'+
-      '<span class="inv-name">'+esc(m.display_name)+'</span>'+
-      '<span class="inv-email">'+(m.email ? esc(m.email) : 'No email')+'</span>'+
+        (eligible ? '' : ' disabled')+'>'+
+      '<span class="inv-name">'+esc(m.display_name)+
+        (isMe ? ' <span class="pico me">You</span>' : '')+'</span>'+
+      sub+
       '</label>';
   });
   if(members.length === 0){
     h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
-      'No other members to share with.</div></div>';
+      'No members to share with.</div></div>';
   }else if(!anyEligible){
     h += '<div class="empty"><div class="empty-sub" style="margin-top:14px;">'+
-      'None of the other members have an email on file yet.</div></div>';
+      'No members are eligible (need an email; withdrawn members only if owed).</div></div>';
   }
   $('share-body').innerHTML = h;
   $('share-pick-all').onclick = function(){
