@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.8">
+<meta name="app-version" content="V2-6.9">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -564,21 +564,32 @@
 
   .td-name-btn:active{background:var(--c-bg);}
   /* ---- TRIP NAME (header dropdown trigger) ---- */
-  .td-name-card{position:absolute;left:50%;top:50%;
-    transform:translate(-50%,-50%);
-    display:inline-flex;align-items:center;gap:8px;
+  /* Trip-name card sits in the header's flex flow between the back button
+     (left) and the action icons (right). flex:1 makes it grow to fill all
+     the available space between them, with small margins so it never
+     touches a button. No absolute positioning, so it can never overlap. */
+  .td-name-card{flex:1 1 auto;min-width:0;margin:0 8px;
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
     padding:7px 14px;border-radius:12px;
     background:var(--c-bg);border:1px solid var(--c-border);
     font-size:15px;font-weight:700;color:var(--c-text);
-    font-family:inherit;cursor:pointer;
-    /* Header has icons on both sides. Left: 1 icon (~46px incl. padding).
-       Right: up to 3 icons (~140px). Reserve 160px on each side from
-       the centered card so it can never visually collide with them. */
-    max-width:calc(100% - 320px);
-    min-width:0;}
-  .td-name-card:active{transform:translate(-50%,-50%) scale(0.97);}
-  .td-name-card #td-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    min-width:0;}
+    font-family:inherit;cursor:pointer;}
+  .td-name-card:active{transform:scale(0.99);}
+  /* Marquee: when the name is wider than the card it scrolls leftward so
+     the user can read the whole thing without interacting. The animation
+     is only applied (via JS adding .is-marquee) when the text overflows;
+     otherwise the name is centered and static. */
+  .td-name-card .td-name-clip{flex:1;min-width:0;overflow:hidden;
+    display:flex;justify-content:center;}
+  .td-name-card #td-name-text{white-space:nowrap;}
+  .td-name-card .td-name-clip.is-marquee{justify-content:flex-start;}
+  .td-name-card .td-name-clip.is-marquee #td-name-text{
+    animation:td-marquee 9s linear infinite;
+    padding-left:100%;}
+  @keyframes td-marquee{
+    0%   {transform:translateX(0);}
+    100% {transform:translateX(-100%);}
+  }
 
   /* ---- EDIT PERSON: trips list ---- */
   .ep-trip-row{display:flex;align-items:center;justify-content:space-between;
@@ -776,8 +787,8 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10"/></svg>
     </button>
     <button class="td-name-card" id="td-name">
-      <span id="td-name-text"></span>
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <span class="td-name-clip" id="td-name-clip"><span id="td-name-text"></span></span>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
     <div class="header-right">
       <button class="icon-btn" id="btn-directory-2" title="Directory" hidden>
@@ -1203,7 +1214,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.8';
+var APP_VERSION = 'V2-6.9';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1309,6 +1320,30 @@ function esc(s){
 function money(n){
   var v = Number(n)||0;
   return (v<0?'-$':'$') + Math.abs(v).toFixed(2);
+}
+
+// Sets the trip name in the header card and enables a scrolling marquee
+// only when the text is too wide to fit. Measured after layout settles.
+function setTripNameHeader(name){
+  var textEl = $('td-name-text');
+  var clipEl = $('td-name-clip');
+  if(!textEl || !clipEl) return;
+  textEl.textContent = name || '';
+  // Reset to static first so we measure the natural width correctly.
+  clipEl.classList.remove('is-marquee');
+  if(!name) return;
+  // Defer measurement until the browser has laid out the header (widths
+  // depend on flex sizing, which isn't final synchronously).
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      // scrollWidth > clientWidth means the name overflows the clip box.
+      if(textEl.scrollWidth > clipEl.clientWidth + 2){
+        clipEl.classList.add('is-marquee');
+      }else{
+        clipEl.classList.remove('is-marquee');
+      }
+    });
+  });
 }
 // Short "Jan 5" / "Jan 5, 2024" date formatting for ad-hoc UI labels.
 function fmtDate(iso){
@@ -1712,7 +1747,7 @@ function openTrip(tripId){
 async function openTripInternal(tripId, tab){
   hide('view-trips');
   show('view-trip');
-  $('td-name-text').textContent = '';
+  setTripNameHeader('');
   state.activeTab = tab || 'settlement';
   state.expandedExpense = null;
   state.expensesLoadedFor = null;
@@ -1725,7 +1760,7 @@ async function openTripInternal(tripId, tab){
     var res=await sb.rpc('get_trip',{ p_trip:tripId });
     if(res.error) throw res.error;
     state.trip = res.data;
-    $('td-name-text').textContent = state.trip.name;
+    setTripNameHeader(state.trip.name);
     renderActiveTab();
   }catch(err){
     $('tab-settlement').innerHTML =
@@ -1847,7 +1882,7 @@ async function saveRenameTrip(){
     closeModal('modal-rename-trip');
     toast('Renamed');
     await reloadTrip();
-    $('td-name-text').textContent = state.trip.name;
+    setTripNameHeader(state.trip.name);
   }catch(err){
     setMsg(err.message || 'Could not rename.');
   }
