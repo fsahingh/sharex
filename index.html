@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-6.3">
+<meta name="app-version" content="V2-6.4">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1167,7 +1167,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-6.3';
+var APP_VERSION = 'V2-6.4';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1977,6 +1977,17 @@ function renderActiveTab(){
       renderExpensesTab();
     }
   }else if(state.activeTab==='settlement'){
+    // Settlement now reads state.expenses to build the Pool Balance and
+    // the per-person Prepay/Expense/Share/Forfeit breakdown shown under
+    // each balance row, so the expense list must be loaded too. Without
+    // this, Pool Balance shows $0 if the user navigates straight to the
+    // Settlement tab without opening Expenses first.
+    if(!state.expensesLoadedFor || state.expensesLoadedFor !== state.trip.trip_id){
+      state.expensesLoadedFor = state.trip.trip_id;
+      // Don't await — both fetches run in parallel; loadExpenses will
+      // call renderSettlementTab itself once its data is in.
+      loadExpenses();
+    }
     if(!state.settlementLoadedFor || state.settlementLoadedFor !== state.trip.trip_id){
       loadSettlement();
     }else{
@@ -2169,16 +2180,29 @@ state.expandedExpense = null;   // id of currently-expanded card
 
 async function loadExpenses(){
   if(!state.trip) return;
-  $('tab-expenses').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  // Only show the loading spinner inside the Expenses tab itself —
+  // not when loading expenses just to populate Settlement.
+  if(state.activeTab === 'expenses'){
+    $('tab-expenses').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+  }
   try{
     var res=await sb.rpc('list_trip_expenses',{ p_trip:state.trip.trip_id });
     if(res.error) throw res.error;
     state.expenses = res.data || [];
-    renderExpensesTab();
+    // Re-render whichever tab is current. Settlement reads state.expenses
+    // for Pool Balance + per-person breakdowns, so it needs a refresh
+    // when expenses arrive after settlement has already painted.
+    if(state.activeTab === 'expenses'){
+      renderExpensesTab();
+    }else if(state.activeTab === 'settlement' && state.settlement){
+      renderSettlementTab();
+    }
   }catch(err){
-    $('tab-expenses').innerHTML =
-      '<div class="empty"><div class="empty-title">Could not load expenses</div>'+
-      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+    if(state.activeTab === 'expenses'){
+      $('tab-expenses').innerHTML =
+        '<div class="empty"><div class="empty-title">Could not load expenses</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+    }
   }
 }
 
