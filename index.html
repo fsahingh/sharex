@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.1">
+<meta name="app-version" content="V2-7.2">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -899,7 +899,7 @@
         <div class="tab-count" style="padding:0 0 6px;">Trips</div>
         <div id="ep-trips-list" class="balance-list" style="margin-bottom:0;"></div>
       </div>
-      <!-- Withdraw / restore: only meaningful when this modal was opened
+      <!-- Cancel / restore: only meaningful when this modal was opened
            from a trip context where the caller is admin of that trip.
            See openEditPerson() for the visibility logic. -->
       <div id="ep-withdraw-section" style="margin-top:18px;" hidden>
@@ -1206,6 +1206,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
@@ -1214,7 +1215,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.1';
+var APP_VERSION = 'V2-7.2';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1271,16 +1272,26 @@ document.addEventListener('visibilitychange', function(){
 });
 // Plus a slow timer for tabs that stay visible all day.
 setInterval(function(){ checkForNewVersion(false); }, 15 * 60 * 1000);
-var SUPABASE_URL = 'https://cptzfqfyrkjgwxkhpfnd.supabase.co';
-var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwdHpmcWZ5cmtqZ3d4a2hwZm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTUyNTcsImV4cCI6MjA5NDY5MTI1N30.moWZjpyIRDJ7Sc2uVw39zLBlZveLGzke-fDadIneymc';
 
+var APP_CONFIG = window.SHARED_EXPENSES_CONFIG || {};
+var SUPABASE_URL = APP_CONFIG.supabaseUrl || '';
+var SUPABASE_ANON_KEY = APP_CONFIG.supabaseAnonKey || '';
 // Apps Script Web App URL — receives POSTs and sends HTML emails through
 // the deployer's Gmail. Configured in mail-proxy.gs. The token is a weak
 // "secret" shared between this client and that script; users can read it
-// from the page source, so don't treat it as real security — it's just a
-// speed bump against random scrapers hitting the URL.
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwd3vf7bohnPBKhBihPt44RfRaFogNhwHfmB5KSTiw08kpQvhvygrAWbQtFl8kNNrF7FQ/exec';
-var APPS_SCRIPT_TOKEN = '12lknds9wrlknds0w3rnlewkfn203rhnewlkn120921hnwlfk';
+// from the loaded config file, so don't treat it as real security — it's
+// just a speed bump against random scrapers hitting the URL.
+var APPS_SCRIPT_URL = APP_CONFIG.appsScriptUrl || '';
+var APPS_SCRIPT_TOKEN = APP_CONFIG.appsScriptToken || '';
+
+if(!SUPABASE_URL || !SUPABASE_ANON_KEY){
+  document.body.innerHTML =
+    '<div class="auth-wrap"><div class="auth-card">'+
+      '<h1>Missing configuration</h1>'+
+      '<div class="auth-sub">Create config.js from config.sample.js and set your Supabase URL and anon key.</div>'+
+    '</div></div>';
+  throw new Error('Missing Supabase configuration');
+}
 
 // persistSession keeps the login token in localStorage so closing and
 // reopening the page does NOT require signing in again. autoRefreshToken
@@ -2079,6 +2090,25 @@ function displayName(p){
   var n = ((p.first_name||'') + ' ' + (p.last_name||'')).trim();
   return n || p.email || 'Unnamed';
 }
+function isKasaName(name){
+  return String(name||'').trim().toUpperCase() === 'KASA';
+}
+function isKasaMember(m){
+  return !!m && isKasaName(displayName(m));
+}
+function findKasaMember(members){
+  return (members||[]).find(isKasaMember) || null;
+}
+function expenseSplitMembers(members, includeWithdrawn){
+  return (members||[]).filter(function(m){
+    return !isKasaMember(m) && (includeWithdrawn || !m.withdrew_at);
+  });
+}
+function activeParticipantMembers(members){
+  return (members||[]).filter(function(m){
+    return !isKasaMember(m) && !m.withdrew_at;
+  });
+}
 function renderPeopleTab(){
   var t=state.trip;
   var el=$('tab-people');
@@ -2466,6 +2496,12 @@ state.expenseKind = 'expense'; // 'expense' or 'prepayment'
 function openExpenseModal(expenseId, mode){
   var t = state.trip;
   if(!t || t.settled) return;
+  var poolPayer = findKasaMember(t.members||[]);
+  if(!poolPayer && t.treasurer_directory_id){
+    poolPayer = (t.members||[]).find(function(m){
+      return m.directory_id === t.treasurer_directory_id;
+    }) || null;
+  }
   state.expenseEditingId = expenseId || null;
   state.expenseMode = mode || (t.is_admin ? 'admin' : 'admin');
   state.expenseOriginal  = null;
@@ -2482,10 +2518,11 @@ function openExpenseModal(expenseId, mode){
     sel.appendChild(o);
   });
 
-  // Build the per-person split list (custom mode)
+  // Build the per-person split list (custom mode). A legacy KASA row is
+  // the pool, not a participant, so it never receives an expense share.
   var splitListEl=$('ex-split-list');
   var sh='';
-  (t.members||[]).forEach(function(m){
+  expenseSplitMembers(t.members||[], !!expenseId).forEach(function(m){
     sh += '<label class="ex-split-row">'+
       '<input type="checkbox" data-mid="'+m.directory_id+'" checked>'+
       '<span class="ex-split-row-name">'+esc(displayName(m))+'</span>'+
@@ -2516,7 +2553,7 @@ function openExpenseModal(expenseId, mode){
     applyKindLayout(state.expenseKind);
     // Split section only for expenses; prepayments don't have one.
     if(!isPre){
-      var memberIds = (t.members||[]).map(function(m){ return m.directory_id; });
+      var memberIds = expenseSplitMembers(t.members||[], true).map(function(m){ return m.directory_id; });
       var splitIds = (exp.split_ids||[]).map(String);
       var isEveryone = (splitIds.length === memberIds.length) &&
                        memberIds.every(function(id){ return splitIds.indexOf(id)>=0; });
@@ -2538,7 +2575,8 @@ function openExpenseModal(expenseId, mode){
   }else{
     // ADD mode
     $('ex-title').textContent = 'Add Expense';
-    $('ex-desc').value=''; $('ex-amount').value=''; $('ex-paid-by').value='';
+    $('ex-desc').value=''; $('ex-amount').value='';
+    $('ex-paid-by').value = poolPayer ? poolPayer.directory_id : '';
     $('ex-delete').hidden = true;
     $('ex-save').textContent = 'Save';
     $('ex-save').disabled = false;
@@ -2563,6 +2601,12 @@ function openExpenseModal(expenseId, mode){
 function applyKindLayout(kind){
   state.expenseKind = kind;
   var isPre = (kind === 'prepayment');
+  var poolPayer = findKasaMember((state.trip||{}).members||[]);
+  if(!poolPayer && state.trip && state.trip.treasurer_directory_id){
+    poolPayer = (state.trip.members||[]).find(function(m){
+      return m.directory_id === state.trip.treasurer_directory_id;
+    }) || null;
+  }
   // Description: hidden + not required for prepayments (auto-filled).
   $('ex-desc-wrap').hidden = isPre;
   // Paid-by label changes wording slightly.
@@ -2578,6 +2622,9 @@ function applyKindLayout(kind){
   }
   // Split section: expenses only.
   $('ex-split-wrap').hidden = isPre;
+  if(!isPre && poolPayer && !state.expenseEditingId && !$('ex-paid-by').value){
+    $('ex-paid-by').value = poolPayer.directory_id;
+  }
 }
 
 // Recomputes whether the form differs from the original; toggles Save.
@@ -2594,6 +2641,10 @@ function readExpenseForm(){
     splitIds = [];
     document.querySelectorAll('#ex-split-list [data-mid]').forEach(function(cb){
       if(cb.checked) splitIds.push(cb.dataset.mid);
+    });
+  }else if(findKasaMember((state.trip||{}).members||[])){
+    splitIds = expenseSplitMembers((state.trip||{}).members||[]).map(function(m){
+      return m.directory_id;
     });
   }
   return {
@@ -2652,6 +2703,9 @@ async function saveExpense(){
   // ---- EXPENSE path (original) ----
   if(!f.description){ setMsg('Description is required.'); return; }
   if(!f.paid_by){ setMsg('Choose who paid.'); return; }
+  if(f.split_ids && f.split_ids.length===0){
+    setMsg('Add at least one participant before saving an expense.'); return;
+  }
   if(f.split_mode==='custom' && (!f.split_ids || f.split_ids.length===0)){
     setMsg('Select at least one person for the split.'); return;
   }
@@ -2725,6 +2779,21 @@ async function deleteExpense(){
 // ----- Settlement tab -----
 state.settlement = null;
 state.settlementLoadedFor = null;
+state.settlementExpenses = [];
+
+async function ensureSettlementExpenses(){
+  if(!state.trip) return [];
+  if(state.expensesLoadedFor === state.trip.trip_id && state.expenses){
+    state.settlementExpenses = state.expenses || [];
+    return state.settlementExpenses;
+  }
+  var res = await sb.rpc('list_trip_expenses',{ p_trip:state.trip.trip_id });
+  if(res.error) throw res.error;
+  state.expenses = res.data || [];
+  state.expensesLoadedFor = state.trip.trip_id;
+  state.settlementExpenses = state.expenses;
+  return state.settlementExpenses;
+}
 
 async function loadSettlement(){
   if(!state.trip) return;
@@ -2733,6 +2802,11 @@ async function loadSettlement(){
     var res=await sb.rpc('get_trip_settlement',{ p_trip:state.trip.trip_id });
     if(res.error) throw res.error;
     state.settlement = res.data;
+    try{
+      await ensureSettlementExpenses();
+    }catch(e){
+      state.settlementExpenses = [];
+    }
     state.settlementLoadedFor = state.trip.trip_id;
     renderSettlementTab();
   }catch(err){
@@ -2747,9 +2821,26 @@ function renderSettlementTab(){
   if(!t || !s){ return; }
   var balances = s.balances || [];
   var transfers = s.transfers || [];
-  var total = Number(s.total)||0;
-  var memberCount = Number(s.member_count) || (t.members||[]).length;
-  var perPerson = Number(s.per_person) || (memberCount>0 ? total/memberCount : 0);
+  var expenseRows = state.settlementExpenses || state.expenses || [];
+  var total = expenseRows.length
+    ? expenseRows.filter(function(e){ return e.kind !== 'prepayment'; })
+        .reduce(function(a,e){ return a + (Number(e.amount)||0); }, 0)
+    : (Number(s.total)||0);
+  var kasa = findKasaMember(t.members||[]);
+  var withdrawnIds = {};
+  (t.members||[]).forEach(function(m){
+    if(m.withdrew_at) withdrawnIds[m.directory_id] = true;
+  });
+  var forfeitedInKasa = (kasa && expenseRows.length)
+    ? expenseRows.filter(function(e){
+        return e.kind === 'prepayment' &&
+          e.paid_to === kasa.directory_id &&
+          withdrawnIds[e.paid_by];
+      }).reduce(function(a,e){ return a + (Number(e.amount)||0); }, 0)
+    : 0;
+  var activeCount = activeParticipantMembers(t.members||[]).length;
+  var sharedTotal = Math.max(0, total - forfeitedInKasa);
+  var perPerson = activeCount>0 ? sharedTotal/activeCount : 0;
   var myDirId = t.my_directory_id;
   var myBal = balances.find(function(b){ return b.directory_id===myDirId; });
   var callerAdmin = !!s.caller_is_admin;
@@ -2943,10 +3034,10 @@ function renderSettlementTab(){
         var name = m ? displayName(m) : (b.name || 'Unknown');
         var avatar = m ? initials(m) : '?';
         var isWithdrawn = !!(b.withdrew || (m && m.withdrew_at));
-        // For withdrawn members the post-forfeit net is 0 (positive
-        // forfeited) or negative (still owes). The raw net before the
-        // forfeit clip is paid - owes; if that was positive, that's
-        // what got forfeited. Show it as an italic note next to the pill.
+        // For withdrawn members the capped cancellation rule makes the
+        // post-forfeit net 0. The raw net before the cap is paid - owes;
+        // if that was positive, that's what got forfeited. Show it as an
+        // italic note next to the pill.
         var rawNet = (Number(b.paid)||0) - (Number(b.owes)||0);
         var forfeitNote = '';
         if(isWithdrawn && rawNet > 0.005){
@@ -3603,7 +3694,7 @@ function applyExpensePicker(){
 // ---- New trip ----
 function openNewTrip(){
   $('nt-name').value='';
-  $('nt-with-treasury').checked = false;
+  $('nt-with-treasury').checked = true;
   $('nt-msg').className='msg';
   openModal('modal-new-trip');
   setTimeout(function(){ $('nt-name').focus(); },150);
@@ -3794,7 +3885,7 @@ async function openEditPerson(dirId){
       $('ep-trips-list').innerHTML = th;
       show('ep-trips-section');
     }
-    // Withdraw / restore — only when this modal was opened from a trip
+    // Cancel / restore — only when this modal was opened from a trip
     // view AND the caller is admin of that trip AND the target is a
     // non-admin member of it.
     setupWithdrawSection(p);
@@ -3823,7 +3914,7 @@ async function openEditPerson(dirId){
   }
 }
 
-// Withdraw section (Edit Person) — managed entirely client-side because
+// Cancel section (Edit Person) — managed entirely client-side because
 // the visibility logic depends on the *current trip* context, which the
 // directory RPC doesn't know about. We look up the target in state.trip.members.
 function setupWithdrawSection(p){
@@ -3846,22 +3937,21 @@ function setupWithdrawSection(p){
   var info = $('ep-withdraw-info');
   if(isWithdrawn){
     info.textContent = 'This person has withdrawn from "'+t.name+'". '+
-      'They\'re excluded from future Everyone-mode expenses. Any non-returnable '+
-      'money they contributed stays toward the trip — their positive balance '+
-      'is forfeited and split among the remaining members.';
+      'They\'re excluded from future Everyone-mode expenses. Their pre-payments '+
+      'stay in the pool and they are not asked for more money.';
     btn.textContent = 'Restore participation';
     btn.style.color = 'var(--c-success)';
     btn.style.background = 'rgba(48,209,88,0.10)';
     btn.style.borderColor = 'transparent';
     btn.onclick = function(){ doRestoreMember(p.directory_id); };
   }else{
-    info.textContent = 'Mark this person as withdrawn from "'+t.name+'". '+
-      'Their positive balance (if any) is forfeited and split equally among '+
-      'the remaining members. Negative balance — they still owe. Future '+
-      'Everyone-mode expenses will skip them automatically. This is reversible.';
-    btn.textContent = 'Withdraw from trip (forfeit)';
-    btn.style.color = 'var(--c-warn)';
-    btn.style.background = 'rgba(255,149,0,0.10)';
+    info.textContent = 'Cancel this person\'s participation in "'+t.name+'". '+
+      'Their pre-payments stay in the pool and are not refunded, but their balance '+
+      'is capped at zero so the app will not request more money from them. '+
+      'Future Everyone-mode expenses will skip them automatically. This is reversible.';
+    btn.textContent = 'Cancel participation';
+    btn.style.color = 'var(--c-danger)';
+    btn.style.background = 'rgba(255,59,48,0.08)';
     btn.style.borderColor = 'transparent';
     btn.onclick = function(){ doWithdrawMember(p.directory_id); };
   }
@@ -3873,27 +3963,31 @@ async function doWithdrawMember(dirId){
   var t = state.trip;
   var member = (t.members||[]).find(function(m){ return m.directory_id === dirId; });
   var nm = member ? displayName(member) : 'this person';
-  var ok = await alertModal('Withdraw '+nm+' from "'+t.name+'"?\n\n'+
-    'Their positive balance will be forfeited and shared equally among the '+
-    'other members. They\'ll be excluded from new Everyone-mode expenses. '+
-    'You can restore them later.',
-    { confirm:true, confirmLabel:'Withdraw', danger:true });
+  var ok = await alertModal('Cancel '+nm+'\'s participation in "'+t.name+'"?\n\n'+
+    'Their pre-payments stay in the pool and are not refunded. If their share is higher '+
+    'than what they already prepaid, their balance is capped at zero so the app '+
+    'will not request more money from them. Future Everyone-mode expenses will skip them.',
+    { confirm:true, confirmLabel:'Cancel participation', danger:true });
   if(!ok) return;
-  overlay('Withdrawing…');
+  overlay('Cancelling…');
   try{
-    var res = await sb.rpc('withdraw_member', {
+    var res = await sb.rpc('withdraw_member_capped', {
       p_trip: state.trip.trip_id, p_dir: dirId
     });
     if(res.error) throw res.error;
     closeModal('modal-edit-person');
     overlayOff();
-    toast('Withdrawn');
+    toast('Participation cancelled');
     state.settlementLoadedFor = null;
     state.expensesLoadedFor = null;
     await reloadTrip();
   }catch(err){
     overlayOff();
-    toast(err.message || 'Could not withdraw', true);
+    var msg = err && err.message ? err.message : 'Could not cancel participation';
+    if(/withdraw_member_capped|schema cache|function/i.test(msg)){
+      msg = 'The cancellation backend RPC is not installed yet.';
+    }
+    toast(msg, true);
   }
 }
 
@@ -4305,7 +4399,7 @@ function updateShareSendLabel(){
 // ============================================================
 //  SETTLEMENT BREAKDOWN (per-user expense list popup)
 // ============================================================
-// Tapping the "You paid" card opens kind='paid'; tapping "Per person"
+// Tapping the "You paid" card opens kind='paid'; tapping "Per active"
 // opens kind='shared'. Both pull from the same RPC and just pick which
 // list to render.
 async function openBreakdown(kind){
