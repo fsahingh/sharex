@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.7">
+<meta name="app-version" content="V2-7.8">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -211,7 +211,11 @@
     border-radius:var(--r-sm);background:var(--c-bg);
     font-size:14px;font-weight:500;cursor:pointer;min-height:46px;
     box-sizing:border-box;text-align:center;min-width:0;
-    position:relative;overflow:hidden;}
+    position:relative;overflow:hidden;
+    /* Single-line label — keeps both cards exactly the same height even
+       when one label is short enough that the browser would otherwise
+       leave room for a hypothetical wrap line. */
+    white-space:nowrap;line-height:1.2;}
   /* Hide the native radio entirely; we draw our own circle. */
   .ex-radio input{position:absolute;opacity:0;pointer-events:none;}
   /* Custom circle indicator */
@@ -508,10 +512,14 @@
   /* Treasurer badge in People sekmesi + balance list. */
   .pico.treasurer{background:rgba(48,209,88,0.15);color:var(--c-success);}
 
-  /* New Trip modal — treasury toggle row */
-  .nt-treasury-row{display:flex;align-items:flex-start;gap:12px;padding:12px;
-    background:var(--c-bg);border:1px solid var(--c-border);border-radius:var(--r-sm);
-    cursor:pointer;}
+  /* New Trip modal — treasury toggle row. The selector is scoped under
+     .modal-body so it wins against the generic ".modal-body label"
+     display:block rule above; otherwise the row would render as a block
+     (checkbox on its own line, title below) instead of side by side. */
+  .modal-body label.nt-treasury-row{display:flex;align-items:flex-start;gap:12px;
+    padding:12px;background:var(--c-bg);border:1px solid var(--c-border);
+    border-radius:var(--r-sm);cursor:pointer;font-size:14px;color:var(--c-text);
+    font-weight:normal;}
   .nt-treasury-row input[type="checkbox"]{flex-shrink:0;width:20px;height:20px;
     accent-color:var(--c-tint);margin:0;margin-top:2px;}
   .nt-treasury-info{flex:1;min-width:0;}
@@ -1236,7 +1244,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.7';
+var APP_VERSION = 'V2-7.8';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
