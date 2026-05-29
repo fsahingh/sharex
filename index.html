@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.8">
+<meta name="app-version" content="V2-7.9">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -206,6 +206,10 @@
 
   /* ---- EXPENSE MODAL — split list ---- */
   .ex-split-mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
+  /* Scoped under .modal-body so the generic ".modal-body label" rule
+     (display:block; margin-top:14px;) cannot override flex layout or
+     add extra top margin that would unbalance the two radio cards. */
+  .modal-body label.ex-radio,
   .ex-radio{display:flex;align-items:center;justify-content:center;
     gap:8px;padding:11px 12px;border:1px solid var(--c-border);
     border-radius:var(--r-sm);background:var(--c-bg);
@@ -215,7 +219,9 @@
     /* Single-line label — keeps both cards exactly the same height even
        when one label is short enough that the browser would otherwise
        leave room for a hypothetical wrap line. */
-    white-space:nowrap;line-height:1.2;}
+    white-space:nowrap;line-height:1.2;
+    /* Reset margin from .modal-body label so the cards line up. */
+    margin:0;color:var(--c-text);}
   /* Hide the native radio entirely; we draw our own circle. */
   .ex-radio input{position:absolute;opacity:0;pointer-events:none;}
   /* Custom circle indicator */
@@ -1244,7 +1250,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.8';
+var APP_VERSION = 'V2-7.9';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
