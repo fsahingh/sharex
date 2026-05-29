@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.4">
+<meta name="app-version" content="V2-7.5">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1217,7 +1217,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.4';
+var APP_VERSION = 'V2-7.5';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3524,15 +3524,40 @@ async function saveAddPerson(){
 
   btn.disabled=true; btn.textContent='Adding…';
   try{
-    var res=await sb.rpc('add_person_to_trip',{
-      p_trip: state.trip.trip_id,
-      p_directory_id: dirId,
-      p_email: email||null,
-      p_first_name: first||null,
-      p_last_name: last||null
-    });
-    if(res.error) throw res.error;
-    var newDirId = res.data;
+    // Same two-step submit as directory-only: if the backend reports a
+    // DUPLICATE_NAME (same first+last already exists in the directory),
+    // ask whether to add as a separate person or cancel. On confirm,
+    // retry with p_allow_name_duplicate=true.
+    var allowDup = false;
+    var newDirId;
+    while(true){
+      var res = await sb.rpc('add_person_to_trip',{
+        p_trip: state.trip.trip_id,
+        p_directory_id: dirId,
+        p_email: email||null,
+        p_first_name: first||null,
+        p_last_name: last||null,
+        p_allow_name_duplicate: allowDup
+      });
+      if(res.error){
+        var msg = res.error.message || '';
+        if(!allowDup && msg.indexOf('DUPLICATE_NAME:') === 0){
+          var existing = msg.substring('DUPLICATE_NAME:'.length).trim();
+          var go = await alertModal(
+            'There is already a "' + existing + '" in the directory. '+
+            'Add as a separate person?',
+            { confirm:true, confirmLabel:'Add as new' }
+          );
+          if(go){ allowDup = true; continue; }
+          // Cancelled: bail out cleanly.
+          btn.disabled=false; btn.textContent='Add';
+          return;
+        }
+        throw res.error;
+      }
+      newDirId = res.data;
+      break;
+    }
     if(mode === 'all'){
       try{
         await sb.rpc('include_member_in_expenses', {
