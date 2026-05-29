@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.9">
+<meta name="app-version" content="V2-8.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -673,9 +673,20 @@
   /* ---- FAB ---- */
   .fab{position:fixed;right:20px;bottom:calc(20px + var(--safe-b));
     width:56px;height:56px;border-radius:50%;background:var(--c-tint);color:#fff;
-    font-size:30px;display:flex;align-items:center;justify-content:center;
-    box-shadow:0 4px 16px rgba(10,132,255,0.4);z-index:80;}
-  .fab:active{opacity:.85;}
+    /* Reset native <button> styles so geometry is exactly 56×56 and the
+       glyph centers correctly. */
+    border:none;padding:0;margin:0;line-height:1;font-family:inherit;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    /* Softer, more diffused glow — symmetric (no vertical offset) so it
+       doesn't read as "a second circle sitting just below the first". */
+    box-shadow:0 8px 24px rgba(10,132,255,0.32),
+               0 2px 6px rgba(10,132,255,0.18);
+    z-index:80;}
+  .fab:active{opacity:.85;transform:scale(0.97);}
+  /* When the FAB uses a "+" text glyph, normalize size and balance the
+     visual centering — most fonts render "+" slightly above the metric
+     midpoint, so a tiny line-height tweak lines it up with the disc. */
+  .fab.fab-plus{font-size:28px;font-weight:300;line-height:0;}
 
   /* ---- MODAL ---- */
   .modal{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;
@@ -765,7 +776,9 @@
     </div>
   </div>
   <div class="content" id="trips-content"></div>
-  <button class="fab" id="fab-new-trip" title="New trip">+</button>
+  <button class="fab" id="fab-new-trip" title="New trip">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
 </div>
 
 <!-- ======================= DIRECTORY ======================= -->
@@ -836,7 +849,9 @@
     <div id="tab-expenses" class="tab-pane" hidden></div>
     <div id="tab-people" class="tab-pane" hidden></div>
   </div>
-  <button class="fab" id="td-fab" hidden title="Add">+</button>
+  <button class="fab" id="td-fab" hidden title="Add">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
 </div>
 
 <!-- ======================= ADD PERSON MODAL ======================= -->
@@ -1250,7 +1265,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.9';
+var APP_VERSION = 'V2-8.0';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
