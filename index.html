@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.3">
+<meta name="app-version" content="V2-7.4">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1217,7 +1217,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.3';
+var APP_VERSION = 'V2-7.4';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3469,19 +3469,44 @@ async function saveAddPerson(){
       return;
     }
     btn.disabled=true; btn.textContent='Adding…';
-    try{
-      var res = await sb.rpc('create_directory_person', {
-        p_first_name: first||null,
-        p_last_name:  last||null,
-        p_email:      email||null
-      });
-      if(res.error) throw res.error;
+    // Two-step submit: first try without name-duplicate override, and if
+    // the RPC reports a name clash via the DUPLICATE_NAME: sentinel, ask
+    // the user whether to add anyway, then retry with the override flag.
+    var allowDup = false;
+    var ok = false;
+    while(true){
+      try{
+        var res = await sb.rpc('create_directory_person', {
+          p_first_name: first||null,
+          p_last_name:  last||null,
+          p_email:      email||null,
+          p_allow_name_duplicate: allowDup
+        });
+        if(res.error) throw res.error;
+        ok = true;
+        break;
+      }catch(err){
+        var msg = err.message || '';
+        if(!allowDup && msg.indexOf('DUPLICATE_NAME:') === 0){
+          // Strip the sentinel prefix to show only the matched name.
+          var existing = msg.substring('DUPLICATE_NAME:'.length).trim();
+          var go = await alertModal(
+            'There is already a "' + existing + '" in the directory. '+
+            'Add another person with the same name anyway?',
+            { confirm:true, confirmLabel:'Add anyway' }
+          );
+          if(go){ allowDup = true; continue; }   // retry with override
+        }
+        setApMsg('err', msg || 'Could not add person.');
+        btn.disabled=false; btn.textContent='Add';
+        return;
+      }
+    }
+    if(ok){
       closeModal('modal-add-person');
       toast('Added to directory');
       // Refresh the directory list so the new person appears immediately.
       if(!$('view-directory').hidden) await openDirectoryInternal();
-    }catch(err){
-      setApMsg('err', err.message||'Could not add person.');
     }
     btn.disabled=false; btn.textContent='Add';
     return;
