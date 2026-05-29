@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-7.6">
+<meta name="app-version" content="V2-7.7">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -162,15 +162,6 @@
   .ap-result-main{flex:1;min-width:0;}
   .ap-result-name{font-size:14px;font-weight:600;}
   .ap-result-email{font-size:11px;color:var(--c-text-2);}
-
-  /* Add-new collapsible section in the Add Person modal. The chevron
-     rotates 180° when the form is open; the fields container animates
-     its max-height for a soft slide-down. */
-  #ap-new-toggle:active{transform:scale(0.99);}
-  #ap-new-fields{transition:max-height 0.22s ease, opacity 0.18s ease;
-    max-height:0;opacity:0;}
-  #ap-new-fields.is-open{max-height:400px;opacity:1;}
-  #ap-new-chevron.is-open{transform:rotate(180deg);}
 
   /* swipe-to-remove (simple) */
   .person-actions{display:flex;align-items:center;gap:8px;flex-shrink:0;}
@@ -859,22 +850,12 @@
         </div>
       </div>
 
-      <!-- Collapsed "add new" section. The header is always visible; the
-           form slides open when toggled or when the empty-state button is
-           tapped. Keeps the default state simple (one search box). -->
-      <div id="ap-new-wrap" style="margin-top:14px;">
-        <button type="button" id="ap-new-toggle"
-          style="width:100%;display:flex;align-items:center;justify-content:space-between;
-                 padding:11px 14px;background:var(--c-bg);border:1px solid var(--c-border);
-                 border-radius:var(--r-sm);font:inherit;color:var(--c-text);cursor:pointer;
-                 font-size:14px;font-weight:600;">
-          <span>+ Add as a new person</span>
-          <span id="ap-new-chevron" style="display:inline-flex;color:var(--c-text-3);transition:transform .18s ease;">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-          </span>
-        </button>
-        <div id="ap-new-fields" hidden style="overflow:hidden;">
-          <div style="display:flex;gap:10px;margin-top:14px;">
+      <!-- New-person form. Hidden by default. Opens only when the empty
+           search banner's "Add as a new person" button is tapped, OR when
+           the modal is in directory-only mode (no search). -->
+      <div id="ap-new-wrap" hidden style="margin-top:14px;">
+        <div id="ap-new-fields">
+          <div style="display:flex;gap:10px;">
             <div style="flex:1;">
               <label for="ap-first">First name</label>
               <input type="text" id="ap-first" class="field" maxlength="40">
@@ -1255,7 +1236,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-7.6';
+var APP_VERSION = 'V2-7.7';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3422,53 +3403,37 @@ function openAddPerson(){
   resetAddPersonModal();
   $('ap-title').textContent = 'Add Person';
   show('ap-search-wrap');
-  show('ap-include-section');
-  // Collapsed by default — search-first UX. Form opens when the user
-  // taps the toggle, or when search returns zero matches and they hit
-  // "Add as a new person" in the empty-state banner.
-  setNewPersonOpen(false);
+  // Start with ONLY the search box visible. "Include in expenses" and the
+  // new-person form both surface conditionally — include shows when a
+  // directory match is picked or when the new-person form is opened; the
+  // form opens only via the empty-state banner.
+  hide('ap-new-wrap');
+  hide('ap-include-section');
   openModal('modal-add-person');
   setTimeout(function(){ $('ap-search').focus(); },150);
 }
 
 // Directory-only mode: no search (admin is creating a directory entry,
-// not searching). Show the form open right away so there's something to
-// type into when the modal appears.
+// not searching). Show the form right away — that's the entire purpose
+// of the modal in this mode.
 function openAddPersonDirectoryOnly(){
   state.addPersonDirectoryOnly = true;
   resetAddPersonModal();
   $('ap-title').textContent = 'Add to Directory';
   hide('ap-search-wrap');
   hide('ap-include-section');
-  setNewPersonOpen(true);
+  show('ap-new-wrap');
   openModal('modal-add-person');
   setTimeout(function(){ $('ap-first').focus(); },150);
 }
 
-// Toggles the collapsible "add new" section. Keeps chevron + fields in
-// sync. Optional focusFirst will move focus into the first name input
-// when opening from a user action.
-function setNewPersonOpen(open, focusFirst){
-  var fields = $('ap-new-fields');
-  var chevron = $('ap-new-chevron');
-  if(!fields || !chevron) return;
-  if(open){
-    fields.hidden = false;
-    // Force a reflow so the CSS transition kicks in on the new max-height.
-    void fields.offsetWidth;
-    fields.classList.add('is-open');
-    chevron.classList.add('is-open');
-    if(focusFirst){
-      setTimeout(function(){ $('ap-first').focus(); }, 80);
-    }
-  }else{
-    fields.classList.remove('is-open');
-    chevron.classList.remove('is-open');
-    // Wait for the CSS transition before fully hiding so the slide is
-    // visible. 240ms matches the 0.22s transition + a small buffer.
-    setTimeout(function(){
-      if(!fields.classList.contains('is-open')) fields.hidden = true;
-    }, 240);
+// Show the new-person form and the include-in-expenses section together.
+// Called when the user taps the empty-state "Add as a new person" button.
+function openNewPersonForm(focusFirst){
+  show('ap-new-wrap');
+  show('ap-include-section');
+  if(focusFirst){
+    setTimeout(function(){ $('ap-first').focus(); }, 80);
   }
 }
 
@@ -5437,24 +5402,20 @@ document.querySelectorAll('#view-trip .tab').forEach(function(t){
 // Add-person modal wiring
 $('ap-cancel').onclick = function(){ closeModal('modal-add-person'); };
 $('ap-save').onclick   = saveAddPerson;
-// Collapsible "add as a new person" section.
-$('ap-new-toggle').onclick = function(){
-  var isOpen = $('ap-new-fields').classList.contains('is-open');
-  setNewPersonOpen(!isOpen, !isOpen);
-};
 // Empty-state "Add as a new person" button (shown when search has no hits).
-// Pre-fills the form from the search query so the user doesn't retype.
+// Pre-fills the form from the search query so the user doesn't retype,
+// then reveals the form + the "include in expenses" section together.
 $('ap-empty-add').onclick = function(){
   var q = $('ap-search').value.trim();
   var parts = splitQueryToName(q);
   if(parts.email){
-    // Looked like an email — only fill the email field.
     $('ap-email').value = parts.email;
   }else{
     $('ap-first').value = parts.first || '';
     $('ap-last').value  = parts.last  || '';
   }
-  setNewPersonOpen(true, true);
+  openNewPersonForm(true);
+  hide('ap-empty');
 };
 // Custom expense picker (for add-person "include in expenses")
 $('ap-include-custom-btn').onclick = openExpensePicker;
@@ -5473,9 +5434,16 @@ $('pool-close').onclick = function(){ closeModal('modal-pool'); };
 $('trs-cancel').onclick = function(){ closeModal('modal-treasurer'); };
 $('trs-save').onclick = saveTreasurer;
 $('ap-search').addEventListener('input', function(){
-  // Typing in search clears any previous directory pick
+  // Typing in search clears any previous directory pick AND reverts the
+  // modal to the default "search only" state — both the new-person form
+  // and the include-in-expenses section get hidden until either a result
+  // is picked or the empty-state banner is tapped.
   $('ap-results').dataset.pickedDir = '';
   $('ap-first').value=''; $('ap-last').value=''; $('ap-email').value='';
+  if(!state.addPersonDirectoryOnly){
+    hide('ap-new-wrap');
+    hide('ap-include-section');
+  }
   var q = $('ap-search').value.trim();
   clearTimeout(apSearchTimer);
   apSearchTimer = setTimeout(function(){ runDirectorySearch(q); }, 220);
@@ -5493,9 +5461,11 @@ $('ap-results').addEventListener('click', function(ev){
   $('ap-search').value = nm;
   hide('ap-results');
   hide('ap-empty');
-  // Collapse the "add new" form if it was open — the user picked someone
-  // existing, the form is no longer relevant.
-  setNewPersonOpen(false);
+  // A directory match was picked: hide the new-person form (not needed)
+  // and reveal "Include in expenses" so the admin can pick how to fold
+  // them into existing splits.
+  hide('ap-new-wrap');
+  show('ap-include-section');
   // Clear any stale new-person field values too, so saveAddPerson doesn't
   // accidentally use them. (saveAddPerson prefers pickedDir when set.)
   $('ap-first').value = '';
