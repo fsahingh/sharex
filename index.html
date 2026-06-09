@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.67">
+<meta name="app-version" content="V2-CLUB.68">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -43,7 +43,31 @@
   body{
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     background:var(--c-bg); color:var(--c-text); -webkit-font-smoothing:antialiased;
+    /* Disable native bounce/overscroll so our pull-to-refresh gesture
+       lands on its own. Keeps the page from rubber-banding above the
+       indicator while the user pulls. */
+    overscroll-behavior-y: contain;
   }
+
+  /* Pull-to-refresh indicator: hidden above viewport, slides down as
+     user pulls, and snaps back when they let go. */
+  .ptr-bar{
+    position:fixed; top:0; left:0; right:0; height:54px;
+    display:flex; align-items:center; justify-content:center;
+    pointer-events:none; z-index:9999;
+    transform:translateY(-60px);
+    transition:transform 0.22s cubic-bezier(.2,.7,.3,1);
+  }
+  .ptr-spinner{
+    width:26px; height:26px;
+    border:2.5px solid var(--c-border);
+    border-top-color:var(--c-tint);
+    border-radius:50%;
+  }
+  .ptr-bar.ptr-active .ptr-spinner{
+    animation:ptr-spin 0.85s linear infinite;
+  }
+  @keyframes ptr-spin{ to{ transform:rotate(360deg); } }
   [hidden]{display:none!important;}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
   input{font-family:inherit;}
@@ -2022,7 +2046,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.67';
+var APP_VERSION = 'V2-CLUB.68';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2517,6 +2541,93 @@ async function submitAccessRequest(){
 // ============================================================
 //  TRIPS SCREEN
 // ============================================================
+// ============================================================
+//  PULL-TO-REFRESH (home / trips list)
+// ============================================================
+// Touch-driven refresh for the trip + club list. Only active while
+// the home tab is the visible surface (we look for #trips-content's
+// visibility). The handlers attach to document so they fire even when
+// the user starts the pull on a child element.
+(function setupPullToRefresh(){
+  var startY = 0;
+  var pullingFromTop = false;
+  var indicatorEl = null;
+  var THRESHOLD = 70;    // px past which release triggers refresh
+  var MAX_PULL  = 110;   // visual cap on how far the bar follows
+
+  function ensureIndicator(){
+    if(indicatorEl) return indicatorEl;
+    indicatorEl = document.createElement('div');
+    indicatorEl.className = 'ptr-bar';
+    indicatorEl.innerHTML = '<div class="ptr-spinner"></div>';
+    document.body.appendChild(indicatorEl);
+    return indicatorEl;
+  }
+
+  function onHomeAndAtTop(){
+    // The trips screen mounts #trips-content. We only enable PTR when
+    // that element exists AND the page is scrolled to the top — once
+    // the user scrolls down, a downward swipe is a normal scroll-up.
+    var el = document.getElementById('trips-content');
+    if(!el) return false;
+    // offsetParent === null means hidden (display:none ancestor).
+    if(el.offsetParent === null) return false;
+    return (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+  }
+
+  document.addEventListener('touchstart', function(e){
+    if(!onHomeAndAtTop()) return;
+    if(!e.touches || !e.touches[0]) return;
+    startY = e.touches[0].clientY;
+    pullingFromTop = true;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e){
+    if(!pullingFromTop) return;
+    var y = e.touches[0].clientY;
+    var dy = y - startY;
+    // Dragging up cancels the gesture so normal scrolling resumes.
+    if(dy <= 0){ pullingFromTop = false; return; }
+    // Pulling down at the top of the home page: follow the finger
+    // with diminishing return, capped at MAX_PULL. The bar travels
+    // from -60 (hidden) toward 0 + a little overshoot for feel.
+    var bar = ensureIndicator();
+    var travel = Math.min(dy * 0.45, MAX_PULL) - 60;
+    bar.style.transform = 'translateY('+travel+'px)';
+    bar.style.transition = 'none';
+    // Prevent the page from rubber-banding while we're driving the
+    // bar — keeps the bar's motion smooth and predictable.
+    if(dy > 8 && e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', function(e){
+    if(!pullingFromTop) return;
+    pullingFromTop = false;
+    var endY = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : startY;
+    var dy = endY - startY;
+    var bar = ensureIndicator();
+    bar.style.transition = '';
+    if(dy >= THRESHOLD){
+      // Trigger refresh. Park the bar mid-pull while loadTrips runs
+      // so the spinner is visible; snap back when it resolves.
+      bar.style.transform = 'translateY(12px)';
+      bar.classList.add('ptr-active');
+      Promise.resolve().then(loadTrips).catch(function(){})
+        .then(function(){
+          setTimeout(function(){
+            bar.style.transform = 'translateY(-60px)';
+            // Remove the spinning class after the bar is fully hidden
+            // so the animation doesn't keep running in the background.
+            setTimeout(function(){ bar.classList.remove('ptr-active'); }, 250);
+          }, 250);
+        });
+    } else {
+      // Didn't pull far enough → snap back.
+      bar.style.transform = 'translateY(-60px)';
+    }
+  }, { passive: true });
+})();
+
 async function loadTrips(){
   $('trips-content').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   try{
@@ -3347,7 +3458,7 @@ function _renderClubDashboardMember(d, t, el, opts){
     }
     return m;
   });
-  var ringSvg = _renderYearRingSvg(displayMonths, ringSize, ringStroke, 4, {
+  var ringSvg = _renderYearRingSvg(displayMonths, ringSize, ringStroke, 8, {
     showLabels: true,
     pulsePeriod: d.current_period,
     selectedPeriod: memberSelected,
@@ -3984,11 +4095,13 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
     var isPulse = !!(opts.pulsePeriod && m.period === opts.pulsePeriod);
     // Selected segment: matches the admin club ring pattern — give it
-    // a thicker stroke so the highlight reads at a glance.
+    // a slight stroke bump so the highlight reads at a glance. Kept
+    // small so the segment doesn't bleed into its neighbours; visual
+    // emphasis comes mainly from the halo arc rendered below.
     var isSelected = !!(opts.selectedPeriod && m.period === opts.selectedPeriod);
     var strokeW = thickness;
-    if(isPulse)    strokeW = thickness + 6;
-    if(isSelected) strokeW = thickness + 8;
+    if(isPulse)    strokeW = thickness + 3;
+    if(isSelected) strokeW = thickness + 4;
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
       strokeW, m.label || '',
       m.period, m.status, m.amount, m.paid_amount);
@@ -6041,7 +6154,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   // Centre disc inset depends on ring size so the inner circle keeps
   // a consistent ratio (stroke + padding stays ~constant).
   var discInset = (ringSize >= 240) ? 46 : 38;
-  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 5,
+  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 8,
     adminSelected, d.current_period, discInset);
   var clubName = t.name || 'Club';
   // Truncate club names so the centre disc text always fits.
@@ -6448,7 +6561,7 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
     // Main segment. Selected one is noticeably thicker so even without
     // the halo it stands out from the rest of the ring.
     paths += _clubArcPath(cx, cy, r, startDeg, endDeg, color,
-      isSelected ? thickness + 6 : thickness,
+      isSelected ? thickness + 4 : thickness,
       m.label_full || '', m.period, m.status, isSelected);
     // Halo overlay for the selected segment: a second concentric arc
     // sitting inside the ring, in the accent colour, with a
