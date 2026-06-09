@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.71">
+<meta name="app-version" content="V2-CLUB.72">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1363,7 +1363,7 @@
     background:var(--c-tint); border-color:var(--c-tint); color:#fff;
   }
   .if-mem-row{
-    display:flex; align-items:center; gap:10px;
+    display:flex; align-items:center; gap:18px;
     padding:11px 14px; border-bottom:0.5px solid var(--c-border);
     cursor:pointer;
   }
@@ -2130,7 +2130,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.71';
+var APP_VERSION = 'V2-CLUB.72';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4673,8 +4673,7 @@ async function _loadAndRenderManageUnpaid(){
   if(!ctx || !t) return;
   var pendingDuesIds = {};
   var pendingEntryFee = false;
-  // Only members need the pending lookup. Admins record changes
-  // directly and don't generate their own claim rows.
+  var pendingFineIds = {};
   if(!ctx.canMgmt){
     try{
       var res = await sb.rpc('list_my_member_requests');
@@ -4687,15 +4686,32 @@ async function _loadAndRenderManageUnpaid(){
             pendingDuesIds[String(r.dues_id)] = true;
           } else if(r.request_type === 'entry_fee_payment_claim'){
             pendingEntryFee = true;
+          } else if(r.request_type === 'fine_payment_claim' && r.fine_id){
+            pendingFineIds[String(r.fine_id)] = true;
           }
         });
       }
-    }catch(err){ /* non-fatal — modal still works without the badge */ }
+    }catch(err){ /* non-fatal */ }
   }
+  // Always pull the caller's fines (member or admin viewing self).
+  // get_member_fines handles permissioning — admin can pass p_dir to
+  // view someone else; here we just want the current actor's set.
+  var finesList = [];
+  try{
+    var dirArg = (ctx.forMemberDir != null) ? ctx.forMemberDir : null;
+    var fr = await sb.rpc('get_member_fines',
+      { p_trip: t.trip_id, p_dir: dirArg });
+    if(!fr.error && fr.data && Array.isArray(fr.data.fines)){
+      finesList = fr.data.fines.filter(function(f){ return f.status === 'pending'; });
+    }
+  }catch(err){ /* non-fatal — modal still renders without fines */ }
+
   state.unpaidModalPending = {
     duesIds:   pendingDuesIds,
-    entryFee:  pendingEntryFee
+    entryFee:  pendingEntryFee,
+    fineIds:   pendingFineIds
   };
+  state.unpaidModalFines = finesList;
   _renderManageUnpaidBody();
 }
 
@@ -4706,13 +4722,14 @@ function _renderManageUnpaidBody(){
   var periods   = ctx.periods || [];
   var entryFee  = Number(ctx.entryFeeOwed) || 0;
   var canMgmt   = !!ctx.canMgmt;
-  var pending   = state.unpaidModalPending || { duesIds:{}, entryFee:false };
+  var pending   = state.unpaidModalPending || { duesIds:{}, entryFee:false, fineIds:{} };
+  var fines     = state.unpaidModalFines || [];
 
-  if(periods.length === 0 && entryFee <= 0){
+  if(periods.length === 0 && entryFee <= 0 && fines.length === 0){
     $('mu-body').innerHTML =
       '<div class="empty" style="padding:24px 6px;">'+
         '<div class="empty-title">Nothing to manage</div>'+
-        '<div class="empty-sub">All months are paid and entry fee is settled.</div>'+
+        '<div class="empty-sub">All months are paid, entry fee is settled, and no fines outstanding.</div>'+
       '</div>';
     return;
   }
@@ -4775,6 +4792,41 @@ function _renderManageUnpaidBody(){
         '</div>'+
         _actionLabel(efPending)+
       '</button>';
+  }
+
+  // ---- Fines section ----------------------------------------------
+  // One row per pending fine. Description on top, date + carry badge
+  // below. Mark as PAID flow mirrors dues: admin records directly;
+  // member submits a claim that admin then approves.
+  if(fines.length > 0){
+    rows +=
+      '<div style="margin-top:14px;margin-bottom:6px;font-size:10.5px;font-weight:700;'+
+        'color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.6px;">'+
+        'Fines</div>';
+    fines.forEach(function(f){
+      var isPending = !!pending.fineIds[String(f.id)];
+      var outstanding = Number(f.outstanding || f.amount) || 0;
+      var when = f.issued_at
+        ? new Date(f.issued_at).toLocaleDateString(undefined,
+            {month:'short', day:'numeric', year:'numeric'})
+        : '';
+      var carried = f.is_carried ? ' · from '+esc(f.issued_period_label||'') : '';
+      rows +=
+        '<button type="button" data-mu-fine-id="'+esc(f.id)+'" '+
+          'data-mu-fine-amt="'+esc(String(outstanding))+'" '+
+          'data-mu-fine-desc="'+esc(f.description||'Fine')+'"'+
+          (isPending ? ' disabled' : '')+
+          ' style="'+_rowStyle(isPending)+'">'+
+          '<div style="flex:1;min-width:0;">'+
+            '<div style="font-size:14px;font-weight:600;">'+esc(f.description||'Fine')+'</div>'+
+            '<div style="font-size:11px;color:#ff453a;margin-top:2px;font-weight:600;">'+
+              money(outstanding)+' owed'+
+              '<span style="color:var(--c-text-3);font-weight:400;margin-left:6px;">· '+esc(when)+esc(carried)+'</span>'+
+            '</div>'+
+          '</div>'+
+          _actionLabel(isPending)+
+        '</button>';
+    });
   }
 
   $('mu-body').innerHTML = rows;
@@ -4859,6 +4911,46 @@ function _wireManageUnpaidRows(){
       } else {
         btn.disabled = false;
         if(spanEl) spanEl.textContent = origLabel;
+      }
+    };
+  });
+
+  // ---- Fines rows ---------------------------------------------------
+  $('mu-body').querySelectorAll('[data-mu-fine-id]').forEach(function(btn){
+    if(btn.disabled) return;
+    btn.onclick = async function(){
+      var fid  = btn.dataset.muFineId;
+      var amt  = parseFloat(btn.dataset.muFineAmt) || 0;
+      var desc = btn.dataset.muFineDesc || 'Fine';
+      // Admin records the payment directly; member submits a claim
+      // and the admin confirms via the bell — same shape as dues.
+      if(canMgmt){
+        var ok = await alertModal(
+          'Mark "' + desc + '" (' + money(amt) + ') paid?',
+          { confirm:true, confirmLabel:'Mark paid' });
+        if(!ok) return;
+        try{
+          var r = await sb.rpc('mark_fine_paid',
+            { p_fine_id: fid, p_amount: null, p_note: null });
+          if(r.error) throw r.error;
+          toast('Fine marked paid');
+          closeModal('modal-manage-unpaid');
+          _refreshAfterUnpaidAction();
+        }catch(err){ toast(err.message || 'Could not mark paid', true); }
+      } else {
+        var note = await promptModal(
+          'How did you pay? (cash / zelle / venmo / paypal / other)',
+          { okLabel:'Submit claim' });
+        if(note === null) return;
+        try{
+          var r = await sb.rpc('submit_fine_payment_claim',
+            { p_fine_id: fid, p_amount: amt, p_note: note || null });
+          if(r.error) throw r.error;
+          toast('Claim submitted — waiting for admin approval');
+          await refreshNotifs();
+          closeModal('modal-manage-unpaid');
+          _refreshAfterUnpaidAction();
+        }catch(err){ toast(err.message || 'Could not submit claim', true); }
       }
     };
   });
@@ -5675,11 +5767,11 @@ async function openIssueFineModal(){
   openModal('modal-issue-fine');
 
   // state.trip.members is already loaded by get_trip; no extra RPC
-  // needed. Skip inactive members + the caller themselves (admin
-  // can't fine themselves through this path).
-  var meDir = state.trip && state.trip.my_directory_id;
+  // needed. We include the admin themselves — they may decide to
+  // fine everyone equally including themselves. Inactive members
+  // stay filtered out.
   var members = ((state.trip && state.trip.members) || []).filter(function(m){
-    return !m.is_inactive && m.directory_id !== meDir;
+    return !m.is_inactive;
   });
   if(members.length === 0){
     $('if-members-list').innerHTML =
@@ -5757,6 +5849,112 @@ async function submitIssueFine(){
 }
 
 // --- Fines breakdown modal (member or admin viewing a member) -------
+// Admin-side: club-wide fines summary, grouped by member. Each
+// member's name shows their subtotal; their fines are listed
+// underneath with description, date, and outstanding amount. Admin
+// can mark paid or cancel from within this modal — the modal closes
+// and refreshes on either action.
+async function openClubFinesSummaryModal(){
+  openModal('modal-fines-breakdown');
+  $('fb-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_club_fines_summary',
+      { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    var data = res.data || { members: [], total_pending: 0 };
+    var members = data.members || [];
+
+    var header =
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 14px;'+
+        'padding:10px 0;border-bottom:1px solid var(--c-border);font-size:13px;">'+
+        '<div style="color:var(--c-text-2);">Total pending</div>'+
+        '<div style="font-weight:800;text-align:right;color:#ff453a;">'+
+          money(data.total_pending||0)+'</div>'+
+      '</div>';
+
+    if(members.length === 0){
+      $('fb-body').innerHTML = header +
+        '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">All settled — no outstanding fines.</div>';
+      return;
+    }
+
+    var html = header;
+    members.forEach(function(m){
+      html +=
+        '<div style="margin-top:18px;display:flex;justify-content:space-between;'+
+          'align-items:baseline;padding:0 0 6px;border-bottom:1px solid var(--c-border);">'+
+          '<div style="font-size:14px;font-weight:700;color:var(--c-text);">'+esc(m.display_name||'')+'</div>'+
+          '<div style="font-size:13px;font-weight:700;color:#ff453a;">'+money(m.member_total||0)+'</div>'+
+        '</div>';
+      (m.fines || []).forEach(function(f){
+        var when = f.issued_at ? new Date(f.issued_at).toLocaleDateString(undefined,
+          {month:'short', day:'numeric', year:'numeric'}) : '';
+        var carriedNote = f.is_carried ? ' · from '+esc(f.issued_period_label||'') : '';
+        var pip = f.is_carried
+          ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+              'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+              'color:#ff9f0a;margin-left:4px;letter-spacing:0.4px;">CARRIED OVER</span>'
+          : '';
+        html +=
+          '<div style="padding:10px 0;border-bottom:0.5px solid var(--c-border);">'+
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'+
+              '<div style="min-width:0;flex:1;">'+
+                '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
+                  esc(f.description||'Fine')+pip+
+                '</div>'+
+                '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+                  esc(when)+esc(carriedNote)+
+                '</div>'+
+              '</div>'+
+              '<div style="font-size:13px;font-weight:700;color:#ff453a;white-space:nowrap;">'+
+                money(f.outstanding||f.amount||0)+'</div>'+
+            '</div>'+
+            '<div style="display:flex;gap:8px;margin-top:8px;justify-content:flex-end;">'+
+              '<button class="btn btn-cancel" style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
+                'data-fb-cancel="'+esc(f.id)+'">Cancel</button>'+
+              '<button class="btn btn-primary" style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
+                'data-fb-mark-paid="'+esc(f.id)+'">Mark paid</button>'+
+            '</div>'+
+          '</div>';
+      });
+    });
+    $('fb-body').innerHTML = html;
+
+    // Same button wiring as the single-member view.
+    document.querySelectorAll('#fb-body [data-fb-mark-paid]').forEach(function(b){
+      b.onclick = async function(){
+        var fid = b.dataset.fbMarkPaid;
+        if(!await alertModal('Mark this fine paid?', { confirm:true, confirmLabel:'Mark paid' })) return;
+        try{
+          var r = await sb.rpc('mark_fine_paid', { p_fine_id: fid, p_amount: null, p_note: null });
+          if(r.error) throw r.error;
+          toast('Fine marked paid');
+          closeModal('modal-fines-breakdown');
+          await _fullRefresh();
+        }catch(err){ alertModal(err.message || 'Could not mark paid.'); }
+      };
+    });
+    document.querySelectorAll('#fb-body [data-fb-cancel]').forEach(function(b){
+      b.onclick = async function(){
+        var fid = b.dataset.fbCancel;
+        var reason = await promptModal('Cancel this fine — reason (optional):', { okLabel:'Cancel fine' });
+        if(reason === null) return;
+        try{
+          var r = await sb.rpc('cancel_fine', { p_fine_id: fid, p_reason: reason || null });
+          if(r.error) throw r.error;
+          toast('Fine cancelled');
+          closeModal('modal-fines-breakdown');
+          await _fullRefresh();
+        }catch(err){ alertModal(err.message || 'Could not cancel.'); }
+      };
+    });
+  }catch(err){
+    $('fb-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
 async function openFinesBreakdownModal(forDir){
   openModal('modal-fines-breakdown');
   $('fb-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
@@ -5835,16 +6033,14 @@ async function openFinesBreakdownModal(forDir){
               '<button class="btn btn-primary" style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
                 'data-fb-mark-paid="'+esc(f.id)+'" data-fb-amount="'+esc(String(f.outstanding||f.amount))+'">Mark paid</button>'+
             '</div>' : '') +
-          (!isAdminEff && f.status === 'pending' ?
-            '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">'+
-              '<button class="btn btn-primary" style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
-                'data-fb-claim="'+esc(f.id)+'" data-fb-amount="'+esc(String(f.outstanding||f.amount))+'">I paid this</button>'+
-            '</div>' : '') +
         '</div>';
     });
     $('fb-body').innerHTML = header + rows;
 
-    // Wire action buttons.
+    // Wire admin action buttons. The member side has no buttons —
+    // they pay fines through the "Dues this month" card's Manage
+    // Unpaid flow, keeping one consistent payment path for all dues
+    // / entry-fee / fine obligations.
     document.querySelectorAll('#fb-body [data-fb-mark-paid]').forEach(function(b){
       b.onclick = async function(){
         var fid = b.dataset.fbMarkPaid;
@@ -5870,22 +6066,6 @@ async function openFinesBreakdownModal(forDir){
           closeModal('modal-fines-breakdown');
           await _fullRefresh();
         }catch(err){ alertModal(err.message || 'Could not cancel.'); }
-      };
-    });
-    document.querySelectorAll('#fb-body [data-fb-claim]').forEach(function(b){
-      b.onclick = async function(){
-        var fid = b.dataset.fbClaim;
-        var amt = parseFloat(b.dataset.fbAmount) || 0;
-        var note = await promptModal('How did you pay? (cash / zelle / paypal / venmo / other)', { okLabel:'Submit claim' });
-        if(note === null) return;
-        try{
-          var r = await sb.rpc('submit_fine_payment_claim',
-            { p_fine_id: fid, p_amount: amt, p_note: note || null });
-          if(r.error) throw r.error;
-          toast('Claim submitted — admin will confirm');
-          closeModal('modal-fines-breakdown');
-          await _fullRefresh();
-        }catch(err){ alertModal(err.message || 'Could not submit claim.'); }
       };
     });
   }catch(err){
@@ -6567,6 +6747,9 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       _statRow('Pool Owes Members', '—',
                { id:'ss-pool-owes', clickable:true,
                  hint:'reimbursements pending' }) +
+      _statRow('Total Fines Pending', '—',
+               { id:'ss-fines-total', clickable:true,
+                 hint:'fines outstanding' }) +
       _statRow('Over Dues '+esc((d.year||'')+''),
                money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
                { hint:'collected of billed' }) +
@@ -6812,6 +6995,30 @@ function _renderClubDashboardAdmin(d, t, el, opts){
         owesEl.style.display = '';
       } else {
         owesEl.style.display = 'none';
+      }
+    });
+  }
+
+  // Total Fines Pending — same async pattern as Pool Owes Members.
+  // Hidden when no member has outstanding fines.
+  var finesEl = el.querySelector('#ss-fines-total');
+  if(finesEl){
+    sb.rpc('get_club_fines_summary',
+      { p_trip: state.trip.trip_id }).then(function(res){
+      if(res.error || !res.data) return;
+      var total = Number(res.data.total_pending || 0);
+      var valueDiv = finesEl.querySelector('div:nth-child(2)');
+      if(total > 0.005){
+        if(valueDiv){
+          valueDiv.innerHTML =
+            money(total) +
+            '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;">›</span>';
+          valueDiv.style.color = '#ff453a';
+        }
+        finesEl.onclick = openClubFinesSummaryModal;
+        finesEl.style.display = '';
+      } else {
+        finesEl.style.display = 'none';
       }
     });
   }
