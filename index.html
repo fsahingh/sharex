@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.70">
+<meta name="app-version" content="V2-CLUB.71">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -935,6 +935,22 @@
         <span style="flex:1;min-width:0;">
           <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Pool In</span>
           <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Money into the pool — donations, rentals, ad-hoc payments.</span>
+        </span>
+      </button>
+      <!-- Issue Fine — admin/treasurer can charge members for rule
+           violations. Rendered here because Issue Fine is a Club-level
+           action, not a personal one. -->
+      <button type="button" id="lac-pick-fine" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:10px 0 0;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(255,159,10,0.18);color:#ff9f0a;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Issue Fine</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Charge one or more members for a rule violation.</span>
         </span>
       </button>
     </div>
@@ -1953,21 +1969,6 @@
           <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Submit a claim for a monthly dues payment you made.</span>
         </span>
       </button>
-      <!-- Admin-only: Issue Fine. We render unconditionally but the
-           opener (openMemberAction) toggles visibility based on role. -->
-      <button type="button" id="ma-pick-fine" class="btn btn-secondary"
-        style="width:100%;display:flex;align-items:flex-start;gap:14px;
-               padding:14px;margin:10px 0 0;min-height:auto;text-align:left;" hidden>
-        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
-                     background:rgba(255,159,10,0.18);color:#ff9f0a;
-                     display:flex;align-items:center;justify-content:center;">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        </span>
-        <span style="flex:1;min-width:0;">
-          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Issue Fine</span>
-          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Charge one or more members for a rule violation.</span>
-        </span>
-      </button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="ma-cancel" style="flex:1;">Cancel</button>
@@ -2129,7 +2130,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.70';
+var APP_VERSION = 'V2-CLUB.71';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4907,12 +4908,6 @@ function _refreshAfterUnpaidAction(){ _fullRefresh(); }
 // "+" FAB on their dashboard. Two paths: log a personal expense
 // (re-uses the trip expense modal), or claim a dues payment (new flow).
 function openMemberAction(){
-  // Show the "Issue Fine" tile only for admin/treasurer/global. Other
-  // members never see it — they don't have authority to fine anyone.
-  var t = state.trip;
-  var canFine = !!(t && (t.is_admin || state.is_treasurer || t.is_global_admin));
-  var fineBtn = document.getElementById('ma-pick-fine');
-  if(fineBtn) fineBtn.hidden = !canFine;
   openModal('modal-member-action');
 }
 function memberPickAddExpense(){
@@ -5669,8 +5664,6 @@ function _renderEditedPip(audit){
 state.issueFine = state.issueFine || { selectedDirs: {}, amountMode: 50 };
 
 async function openIssueFineModal(){
-  // Reset selection each time so a fresh issuance doesn't carry over
-  // last batch's checkboxes. The amount mode resets to the $50 preset.
   state.issueFine = { selectedDirs: {}, amountMode: 50 };
   $('if-desc').value = '';
   $('if-amount-custom').value = '';
@@ -5679,51 +5672,40 @@ async function openIssueFineModal(){
   $('if-msg').textContent = '';
   _ifSyncPresetChips();
   _ifSyncMembersCount();
-  $('if-members-list').innerHTML = '<div style="padding:24px;text-align:center;color:var(--c-text-3);font-size:12.5px;">Loading members…</div>';
   openModal('modal-issue-fine');
-  try{
-    // Pull the trip's member list. We use the existing list_trip_members
-    // RPC if it returns the right shape, otherwise the get_club_members
-    // surface. Falls back gracefully to whichever's available.
-    var res = await sb.rpc('list_trip_members', { p_trip: state.trip.trip_id });
-    if(res.error) throw res.error;
-    var members = (res.data || []).filter(function(m){
-      // Skip inactive members + the caller themselves (admin can't
-      // fine themselves through this path).
-      var meDir = state.trip && state.trip.my_directory_id;
-      return !m.is_inactive && m.directory_id !== meDir;
-    });
-    if(members.length === 0){
-      $('if-members-list').innerHTML = '<div style="padding:24px;text-align:center;color:var(--c-text-3);font-size:12.5px;">No other members to fine.</div>';
-      return;
-    }
-    var html = '';
-    members.forEach(function(m){
-      var nm = (m.first_name||'')+' '+(m.last_name||'');
-      nm = nm.trim() || m.email || '—';
-      html +=
-        '<label class="if-mem-row" data-if-dir="'+esc(m.directory_id)+'">'+
-          '<input type="checkbox" data-if-mem-cb="'+esc(m.directory_id)+'">'+
-          '<span class="if-mem-name">'+esc(nm)+'</span>'+
-        '</label>';
-    });
-    $('if-members-list').innerHTML = html;
-    // Wire checkboxes to the selectedDirs state. Tapping anywhere on
-    // the row toggles the checkbox (the <label> wrapping does the
-    // heavy lifting natively).
-    document.querySelectorAll('#if-members-list [data-if-mem-cb]').forEach(function(cb){
-      cb.addEventListener('change', function(){
-        var dir = cb.dataset.ifMemCb;
-        if(cb.checked) state.issueFine.selectedDirs[dir] = true;
-        else delete state.issueFine.selectedDirs[dir];
-        _ifSyncMembersCount();
-      });
-    });
-  }catch(err){
+
+  // state.trip.members is already loaded by get_trip; no extra RPC
+  // needed. Skip inactive members + the caller themselves (admin
+  // can't fine themselves through this path).
+  var meDir = state.trip && state.trip.my_directory_id;
+  var members = ((state.trip && state.trip.members) || []).filter(function(m){
+    return !m.is_inactive && m.directory_id !== meDir;
+  });
+  if(members.length === 0){
     $('if-members-list').innerHTML =
-      '<div style="padding:16px;text-align:center;color:var(--c-danger);font-size:12px;">'+
-      esc(err.message || 'Could not load members')+'</div>';
+      '<div style="padding:24px;text-align:center;color:var(--c-text-3);font-size:12.5px;">No other members to fine.</div>';
+    return;
   }
+  var html = '';
+  members.forEach(function(m){
+    var nm = ((m.first_name||'')+' '+(m.last_name||'')).trim() || m.email || '—';
+    html +=
+      '<label class="if-mem-row" data-if-dir="'+esc(m.directory_id)+'">'+
+        '<input type="checkbox" data-if-mem-cb="'+esc(m.directory_id)+'">'+
+        '<span class="if-mem-name">'+esc(nm)+'</span>'+
+      '</label>';
+  });
+  $('if-members-list').innerHTML = html;
+  // Wire checkboxes to selectedDirs. The <label> wrapping forwards
+  // taps on the row to the checkbox natively.
+  document.querySelectorAll('#if-members-list [data-if-mem-cb]').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      var dir = cb.dataset.ifMemCb;
+      if(cb.checked) state.issueFine.selectedDirs[dir] = true;
+      else delete state.issueFine.selectedDirs[dir];
+      _ifSyncMembersCount();
+    });
+  });
 }
 
 function _ifSyncMembersCount(){
@@ -12488,6 +12470,10 @@ $('cex-paid-by').onchange = _onClubExpensePaidByChange;
 $('lac-cancel').onclick      = function(){ closeModal('modal-ledger-add-chooser'); };
 $('lac-pick-expense').onclick = openClubAddExpense;
 $('lac-pick-pool-in').onclick = openClubPoolIn;
+$('lac-pick-fine').onclick    = function(){
+  closeModal('modal-ledger-add-chooser');
+  setTimeout(openIssueFineModal, 180);
+};
 
 // Pool In modal: category chip selection + submit/cancel.
 $('pi-cancel').onclick = function(){ closeModal('modal-pool-in'); };
@@ -12551,10 +12537,6 @@ $('acc-recycle').onclick=openRecycleBin;
 $('ma-cancel').onclick      = function(){ closeModal('modal-member-action'); };
 $('ma-pick-expense').onclick= memberPickAddExpense;
 $('ma-pick-dues').onclick   = memberPickPaidDues;
-$('ma-pick-fine').onclick   = function(){
-  closeModal('modal-member-action');
-  setTimeout(openIssueFineModal, 180);
-};
 $('sm-close').onclick       = function(){ closeModal('modal-see-members'); };
 $('mya-close').onclick      = function(){ closeModal('modal-my-activity'); };
 
