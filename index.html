@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.68">
+<meta name="app-version" content="V2-CLUB.69">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2046,7 +2046,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.68';
+var APP_VERSION = 'V2-CLUB.69';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3458,7 +3458,7 @@ function _renderClubDashboardMember(d, t, el, opts){
     }
     return m;
   });
-  var ringSvg = _renderYearRingSvg(displayMonths, ringSize, ringStroke, 8, {
+  var ringSvg = _renderYearRingSvg(displayMonths, ringSize, ringStroke, 4, {
     showLabels: true,
     pulsePeriod: d.current_period,
     selectedPeriod: memberSelected,
@@ -4100,8 +4100,8 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     // emphasis comes mainly from the halo arc rendered below.
     var isSelected = !!(opts.selectedPeriod && m.period === opts.selectedPeriod);
     var strokeW = thickness;
-    if(isPulse)    strokeW = thickness + 3;
-    if(isSelected) strokeW = thickness + 4;
+    if(isPulse)    strokeW = thickness + 2;
+    if(isSelected) strokeW = thickness + 2;
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
       strokeW, m.label || '',
       m.period, m.status, m.amount, m.paid_amount);
@@ -4191,7 +4191,7 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
     extra += ' style="cursor:pointer;"';
   }
   return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
-         '" stroke-linecap="round" fill="none" opacity="'+opacity+'"'+extra+'>'+
+         '" stroke-linecap="butt" fill="none" opacity="'+opacity+'"'+extra+'>'+
          (label ? '<title>'+esc(label)+'</title>' : '') +
          '</path>';
 }
@@ -6154,7 +6154,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   // Centre disc inset depends on ring size so the inner circle keeps
   // a consistent ratio (stroke + padding stays ~constant).
   var discInset = (ringSize >= 240) ? 46 : 38;
-  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 8,
+  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 4,
     adminSelected, d.current_period, discInset);
   var clubName = t.name || 'Club';
   // Truncate club names so the centre disc text always fits.
@@ -6561,7 +6561,7 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
     // Main segment. Selected one is noticeably thicker so even without
     // the halo it stands out from the rest of the ring.
     paths += _clubArcPath(cx, cy, r, startDeg, endDeg, color,
-      isSelected ? thickness + 4 : thickness,
+      isSelected ? thickness + 2 : thickness,
       m.label_full || '', m.period, m.status, isSelected);
     // Halo overlay for the selected segment: a second concentric arc
     // sitting inside the ring, in the accent colour, with a
@@ -6643,7 +6643,7 @@ function _clubArcPath(cx, cy, r, startDeg, endDeg, color, thickness,
   var opacity = (color === '#3a3a3c' && !isSelected) ? 0.30 : 1;
   var d = 'M '+p1.x+' '+p1.y+' A '+r+' '+r+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y;
   return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
-         '" stroke-linecap="round" fill="none" opacity="'+opacity+'" '+
+         '" stroke-linecap="butt" fill="none" opacity="'+opacity+'" '+
          'data-seg-period="'+esc(period||'')+'" '+
          'data-seg-status="'+esc(status||'')+'" '+
          (isSelected ? 'filter="drop-shadow(0 0 4px '+color+'55)"' : '') + '>'+
