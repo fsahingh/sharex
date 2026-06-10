@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.74">
+<meta name="app-version" content="V2-CLUB.75">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1244,22 +1244,27 @@
 <!-- Admin-side: cash reimbursement + optional dues offset -->
 <div class="modal" id="modal-mark-reimbursed" hidden>
   <div class="modal-backdrop"></div>
-  <div class="modal-sheet">
+  <div class="modal-sheet" style="max-height:88vh;">
     <div class="modal-handle"></div>
     <div class="modal-title">Mark reimbursed</div>
-    <div class="modal-body">
+    <div class="modal-body" style="overflow-y:auto;">
       <div style="font-size:15px;font-weight:700;" id="mr-name">Member</div>
       <div style="font-size:12px;color:var(--c-text-2);margin-top:2px;" id="mr-net">Net owed: $0.00</div>
       <label for="mr-cash" style="margin-top:16px;">Cash reimbursed ($)</label>
       <input type="number" id="mr-cash" class="field" min="0" step="0.01" placeholder="0.00">
-      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">Real money sent to the member from the pool.</div>
-      <label style="margin-top:14px;display:flex;align-items:center;gap:8px;font-weight:600;">
-        <input type="checkbox" id="mr-offset-toggle" style="width:auto;margin:0;"> Apply some of the credit to unpaid dues instead
+      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">Real money sent from the pool. Pool balance drops by this amount.</div>
+      <label style="margin-top:14px;display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;">
+        <input type="checkbox" id="mr-offset-toggle" style="width:auto;margin:0;"> Apply some of the credit to unpaid dues / fines / entry fee instead
       </label>
-      <div id="mr-offset-wrap" hidden style="margin-top:8px;">
-        <label for="mr-offset">Dues offset ($)</label>
-        <input type="number" id="mr-offset" class="field" min="0" step="0.01" placeholder="0.00">
-        <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">Reduces the member's owed dues by this amount in lieu of cash.</div>
+      <div id="mr-offset-wrap" hidden style="margin-top:12px;">
+        <div style="font-size:11px;color:var(--c-text-3);margin-bottom:8px;line-height:1.45;">
+          Pick items to settle from this reimbursement credit. Each one reduces the cash you'd otherwise send. Items larger than the remaining credit are grayed out.
+        </div>
+        <div id="mr-offset-items" style="border:1px solid var(--c-border);border-radius:10px;background:var(--c-bg);max-height:280px;overflow-y:auto;"></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-top:10px;padding:0 4px;">
+          <span style="color:var(--c-text-2);">Applied as offset</span>
+          <span id="mr-offset-applied" style="color:#ff9f0a;">$0.00</span>
+        </div>
       </div>
       <label for="mr-note" style="margin-top:14px;">Note (optional)</label>
       <input type="text" id="mr-note" class="field" maxlength="200" placeholder="e.g. Venmo on Jun 6">
@@ -1271,6 +1276,29 @@
     </div>
   </div>
 </div>
+
+<style>
+  .mr-item{
+    display:flex; align-items:center; padding:11px 14px;
+    border-bottom:0.5px solid var(--c-border); cursor:pointer;
+  }
+  .mr-item:last-child{ border-bottom:none; }
+  .mr-item input[type=checkbox]{
+    width:18px; height:18px; margin:0 16px 0 0; flex-shrink:0;
+  }
+  .mr-item .mr-item-body{ flex:1; min-width:0; }
+  .mr-item .mr-item-label{ font-size:13.5px; color:var(--c-text); font-weight:600; }
+  .mr-item .mr-item-sub{ font-size:11px; color:var(--c-text-3); margin-top:2px; }
+  .mr-item .mr-item-amt{
+    font-size:13px; font-weight:700; color:#ff453a; white-space:nowrap; margin-left:10px;
+  }
+  .mr-item.is-disabled{ opacity:0.4; cursor:not-allowed; }
+  .mr-item-group-title{
+    font-size:10.5px; font-weight:700; color:var(--c-text-3);
+    text-transform:uppercase; letter-spacing:0.6px;
+    padding:10px 14px 4px;
+  }
+</style>
 
 <!-- Member-side: submit a new expense for admin approval -->
 <div class="modal" id="modal-submit-expense" hidden>
@@ -2191,7 +2219,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.74';
+var APP_VERSION = 'V2-CLUB.75';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -6525,63 +6553,208 @@ async function openPoolOwesMembersModal(){
 // --- Admin: Mark Reimbursed modal ---
 function openMarkReimbursedModal(ctx){
   state.markReimbursedCtx = ctx;
+  state.mrOffset = {
+    duesIds: {}, fineIds: {}, entryFee: false,
+    items: null   // populated by async fetch
+  };
   $('mr-name').textContent = ctx.name || 'Member';
   $('mr-net').textContent = 'Net owed: ' + money(ctx.net || 0);
-  // Default: full amount as cash, no offset. Toggling the offset
-  // checkbox subtracts the offset from the cash field automatically
-  // so the totals stay balanced and the user doesn't have to compute
-  // the leftover by hand.
   var net = Number(ctx.net || 0);
   $('mr-cash').value = (net > 0) ? net.toFixed(2) : '';
   $('mr-offset-toggle').checked = false;
-  $('mr-offset').value = '';
   $('mr-offset-wrap').hidden = true;
+  $('mr-offset-items').innerHTML =
+    '<div style="padding:24px;text-align:center;color:var(--c-text-3);font-size:12.5px;">Loading…</div>';
+  $('mr-offset-applied').textContent = money(0);
   $('mr-note').value = '';
   $('mr-msg').className = 'msg';
   $('mr-msg').textContent = '';
   openModal('modal-mark-reimbursed');
+
+  // Pre-fetch the member's owed items in the background; if the user
+  // toggles the offset checkbox we already have the data ready.
+  sb.rpc('get_member_owed_items',
+    { p_trip: state.trip.trip_id, p_dir: ctx.dir }).then(function(res){
+    if(res.error || !res.data){
+      state.mrOffset.items = { dues: [], fines: [], entry_fee: 0 };
+    } else {
+      state.mrOffset.items = res.data;
+    }
+    if($('mr-offset-toggle').checked) _mrRenderOffsetItems();
+  });
 }
 
-// When the offset value changes, the cash field follows so that
-// cash + offset = net by default. The user can still override either
-// field manually if their real-world payment doesn't add up that way
-// (a warning fires on submit if the total exceeds net).
-function _mrRecomputeCash(){
-  var ctx = state.markReimbursedCtx || {};
-  var net = Number(ctx.net || 0);
-  if(!$('mr-offset-toggle').checked){
-    $('mr-cash').value = net > 0 ? net.toFixed(2) : '';
+function _mrRenderOffsetItems(){
+  var items = state.mrOffset.items;
+  if(!items){
+    $('mr-offset-items').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--c-text-3);font-size:12.5px;">Loading…</div>';
     return;
   }
-  var offset = parseFloat($('mr-offset').value) || 0;
-  var remaining = Math.max(net - offset, 0);
-  $('mr-cash').value = remaining > 0 ? remaining.toFixed(2) : '0';
+  var hasAny = (items.dues && items.dues.length) ||
+               (items.fines && items.fines.length) ||
+               (Number(items.entry_fee) > 0);
+  if(!hasAny){
+    $('mr-offset-items').innerHTML =
+      '<div style="padding:18px;text-align:center;color:var(--c-text-3);font-size:12.5px;">Nothing outstanding — no offset items available.</div>';
+    return;
+  }
+  var html = '';
+  // Dues group
+  if(items.dues && items.dues.length){
+    html += '<div class="mr-item-group-title">Unpaid dues</div>';
+    items.dues.forEach(function(d){
+      var checked = !!state.mrOffset.duesIds[d.id];
+      html +=
+        '<label class="mr-item" data-mr-dues="'+esc(d.id)+'" data-mr-amt="'+esc(String(d.outstanding))+'">'+
+          '<input type="checkbox" data-mr-cb="dues:'+esc(d.id)+'"'+(checked?' checked':'')+'>'+
+          '<div class="mr-item-body">'+
+            '<div class="mr-item-label">'+esc(d.period_label||'')+'</div>'+
+          '</div>'+
+          '<div class="mr-item-amt">'+money(d.outstanding)+'</div>'+
+        '</label>';
+    });
+  }
+  // Entry fee
+  if(Number(items.entry_fee) > 0){
+    var efChecked = !!state.mrOffset.entryFee;
+    html += '<div class="mr-item-group-title">Entry fee</div>';
+    html +=
+      '<label class="mr-item" data-mr-entryfee="1" data-mr-amt="'+esc(String(items.entry_fee))+'">'+
+        '<input type="checkbox" data-mr-cb="entryFee"'+(efChecked?' checked':'')+'>'+
+        '<div class="mr-item-body">'+
+          '<div class="mr-item-label">Entry fee</div>'+
+        '</div>'+
+        '<div class="mr-item-amt">'+money(items.entry_fee)+'</div>'+
+      '</label>';
+  }
+  // Fines
+  if(items.fines && items.fines.length){
+    html += '<div class="mr-item-group-title">Outstanding fines</div>';
+    items.fines.forEach(function(f){
+      var checked = !!state.mrOffset.fineIds[f.id];
+      var carried = f.is_carried ? ' · from '+esc(f.issued_period_label||'') : '';
+      html +=
+        '<label class="mr-item" data-mr-fine="'+esc(f.id)+'" data-mr-amt="'+esc(String(f.outstanding))+'">'+
+          '<input type="checkbox" data-mr-cb="fine:'+esc(f.id)+'"'+(checked?' checked':'')+'>'+
+          '<div class="mr-item-body">'+
+            '<div class="mr-item-label">'+esc(f.description||'Fine')+'</div>'+
+            '<div class="mr-item-sub">'+esc(carried)+'</div>'+
+          '</div>'+
+          '<div class="mr-item-amt">'+money(f.outstanding)+'</div>'+
+        '</label>';
+    });
+  }
+  $('mr-offset-items').innerHTML = html;
+
+  // Wire each checkbox to toggle state + recompute.
+  document.querySelectorAll('#mr-offset-items [data-mr-cb]').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      var key = cb.dataset.mrCb;
+      var labelEl = cb.closest('.mr-item');
+      var amt = parseFloat(labelEl && labelEl.dataset.mrAmt) || 0;
+      // Before accepting the toggle, check it wouldn't push the
+      // applied total above the net owed. If it would, refuse to
+      // check it (still allow uncheck).
+      if(cb.checked){
+        var alreadyApplied = _mrAppliedTotal();
+        var net = Number(state.markReimbursedCtx.net || 0);
+        if(alreadyApplied + amt > net + 0.005){
+          cb.checked = false;
+          return;
+        }
+      }
+      if(key === 'entryFee'){
+        state.mrOffset.entryFee = !!cb.checked;
+      } else if(key.indexOf('dues:') === 0){
+        var id = key.slice(5);
+        if(cb.checked) state.mrOffset.duesIds[id] = true;
+        else delete state.mrOffset.duesIds[id];
+      } else if(key.indexOf('fine:') === 0){
+        var fid = key.slice(5);
+        if(cb.checked) state.mrOffset.fineIds[fid] = true;
+        else delete state.mrOffset.fineIds[fid];
+      }
+      _mrSyncOffsetTotalsAndCash();
+    });
+  });
+  _mrSyncOffsetTotalsAndCash();
 }
+
+function _mrAppliedTotal(){
+  var items = state.mrOffset.items || { dues:[], fines:[], entry_fee:0 };
+  var t = 0;
+  (items.dues || []).forEach(function(d){
+    if(state.mrOffset.duesIds[d.id]) t += Number(d.outstanding) || 0;
+  });
+  (items.fines || []).forEach(function(f){
+    if(state.mrOffset.fineIds[f.id]) t += Number(f.outstanding) || 0;
+  });
+  if(state.mrOffset.entryFee) t += Number(items.entry_fee) || 0;
+  return t;
+}
+
+function _mrSyncOffsetTotalsAndCash(){
+  var applied = _mrAppliedTotal();
+  var net = Number(state.markReimbursedCtx.net || 0);
+  $('mr-offset-applied').textContent = money(applied);
+  // Cash auto-recomputes only when the offset checkbox is on — keep
+  // total cash + offset = net by default. The admin can still
+  // override the cash field manually.
+  if($('mr-offset-toggle').checked){
+    var remaining = Math.max(net - applied, 0);
+    $('mr-cash').value = remaining > 0 ? remaining.toFixed(2) : '0';
+  }
+  // Disable items that exceed the remaining credit so they can't be
+  // selected. Already-checked items are never disabled (they're
+  // contributing to the applied total).
+  var net2 = net;
+  document.querySelectorAll('#mr-offset-items .mr-item').forEach(function(row){
+    var cb = row.querySelector('[data-mr-cb]');
+    var amt = parseFloat(row.dataset.mrAmt) || 0;
+    if(cb.checked){
+      row.classList.remove('is-disabled');
+      cb.disabled = false;
+      return;
+    }
+    var headroom = net2 - applied;
+    if(amt > headroom + 0.005){
+      row.classList.add('is-disabled');
+      cb.disabled = true;
+    } else {
+      row.classList.remove('is-disabled');
+      cb.disabled = false;
+    }
+  });
+}
+
 async function submitMarkReimbursed(){
   var ctx = state.markReimbursedCtx || {};
   var cash = parseFloat($('mr-cash').value) || 0;
-  var offset = $('mr-offset-toggle').checked
-    ? (parseFloat($('mr-offset').value) || 0)
-    : 0;
+  var applied = _mrAppliedTotal();
   var note = ($('mr-note').value || '').trim() || null;
   function setMsg(t){ $('mr-msg').className='msg show err'; $('mr-msg').textContent=t; }
-  if(cash <= 0 && offset <= 0){
-    setMsg('Enter a cash amount, an offset, or both.'); return;
+  if(cash <= 0 && applied <= 0){
+    setMsg('Enter a cash amount or pick at least one offset item.'); return;
   }
-  if((cash + offset) > (Number(ctx.net||0) + 0.005)){
-    if(!await alertModal('Total exceeds the net owed of '+money(ctx.net||0)+
-       '. The pool balance can go negative. Proceed?',
-       { confirm:true, confirmLabel:'Proceed' })){ return; }
+  if((cash + applied) > (Number(ctx.net||0) + 0.005)){
+    if(!await alertModal('Total ('+money(cash+applied)+') exceeds the net owed of '+money(ctx.net||0)+
+       '. Pool balance can go negative. Proceed?',
+       { confirm:true, confirmLabel:'Proceed', danger:true })){ return; }
   }
   var btn = $('mr-save');
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
-    var res = await sb.rpc('mark_member_reimbursed', {
-      p_trip:                  state.trip.trip_id,
-      p_dir:                   ctx.dir,
-      p_reimburse_amount:      cash,
-      p_apply_to_dues_amount:  offset,
-      p_note:                  note
+    var duesIds = Object.keys(state.mrOffset.duesIds || {});
+    var fineIds = Object.keys(state.mrOffset.fineIds || {});
+    var res = await sb.rpc('mark_member_reimbursed_with_offsets', {
+      p_trip:             state.trip.trip_id,
+      p_dir:              ctx.dir,
+      p_cash:             cash,
+      p_dues_ids:         duesIds.length ? duesIds : null,
+      p_fine_ids:         fineIds.length ? fineIds : null,
+      p_apply_entry_fee:  !!state.mrOffset.entryFee,
+      p_note:             note
     });
     if(res.error) throw res.error;
     closeModal('modal-mark-reimbursed');
@@ -6591,6 +6764,7 @@ async function submitMarkReimbursed(){
   }catch(err){ setMsg(err.message || 'Could not save.'); }
   btn.disabled = false; btn.textContent = 'Confirm';
 }
+async function _legacy_submitMarkReimbursed_removed(){ /* superseded by new submit above */ }
 
 // --- Member: Submit Expense modal ---
 function openSubmitExpenseModal(){
@@ -12860,13 +13034,19 @@ $('mr-cancel').onclick = function(){ closeModal('modal-mark-reimbursed'); };
 $('mr-save').onclick   = submitMarkReimbursed;
 $('mr-offset-toggle').onchange = function(){
   $('mr-offset-wrap').hidden = !$('mr-offset-toggle').checked;
-  if(!$('mr-offset-toggle').checked) $('mr-offset').value = '';
-  _mrRecomputeCash();
+  if($('mr-offset-toggle').checked){
+    _mrRenderOffsetItems();
+  } else {
+    // Wipe any selections — going from offset back to cash-only
+    // returns the cash field to the full net amount.
+    state.mrOffset.duesIds = {};
+    state.mrOffset.fineIds = {};
+    state.mrOffset.entryFee = false;
+    var net = Number((state.markReimbursedCtx||{}).net || 0);
+    $('mr-cash').value = net > 0 ? net.toFixed(2) : '';
+    $('mr-offset-applied').textContent = money(0);
+  }
 };
-// Live cash recompute as the offset value changes — so cash + offset
-// keeps adding up to the net owed by default.
-$('mr-offset').addEventListener('input',  _mrRecomputeCash);
-$('mr-offset').addEventListener('change', _mrRecomputeCash);
 $('se-cancel').onclick = function(){ closeModal('modal-submit-expense'); };
 $('se-submit').onclick = submitMemberExpense;
 
