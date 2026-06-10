@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.75">
+<meta name="app-version" content="V2-CLUB.76">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2219,7 +2219,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.75';
+var APP_VERSION = 'V2-CLUB.76';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4692,6 +4692,7 @@ function _renderMemberBreakdown(){
   html += '<div style="margin-top:4px;">'+
     _r('Dues',       money(c.dues      || 0)) +
     _r('Entry fees', money(c.entry_fee || 0)) +
+    _r('Fines',      money(c.fine      || 0)) +
     _r('Donations',  money(c.donation  || 0)) +
     _r('Rentals',    money(c.rental    || 0)) +
   '</div>';
