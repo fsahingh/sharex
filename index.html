@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.73">
+<meta name="app-version" content="V2-CLUB.74">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1353,6 +1353,45 @@
   </div>
 </div>
 
+<!-- Payment method picker — chip-based, reusable across fine claim,
+     entry fee claim, etc. Replaces the freeform prompt with a quick
+     tap on Cash / Zelle / PayPal / Venmo / Other. -->
+<div class="modal" id="modal-pay-method" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="pm-title">How did you pay?</div>
+    <div class="modal-body">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+        <button type="button" class="pm-chip" data-pm="cash">Cash</button>
+        <button type="button" class="pm-chip" data-pm="zelle">Zelle</button>
+        <button type="button" class="pm-chip" data-pm="paypal">PayPal</button>
+        <button type="button" class="pm-chip" data-pm="venmo">Venmo</button>
+        <button type="button" class="pm-chip" data-pm="other">Other</button>
+      </div>
+      <div id="pm-other-wrap" hidden style="margin-top:12px;">
+        <label for="pm-other-input">Specify</label>
+        <input type="text" id="pm-other-input" class="field" maxlength="100" placeholder="e.g. bank transfer">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="pm-cancel">Cancel</button>
+      <button class="btn btn-primary" id="pm-confirm">Submit</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .pm-chip{
+    background:var(--c-bg); border:1px solid var(--c-border);
+    border-radius:999px; padding:8px 18px; font-size:14px; font-weight:600;
+    color:var(--c-text); cursor:pointer;
+  }
+  .pm-chip.active{
+    background:var(--c-tint); border-color:var(--c-tint); color:#fff;
+  }
+</style>
+
 <!-- Admin: edit fine (description + amount) -->
 <div class="modal" id="modal-edit-fine" hidden>
   <div class="modal-backdrop"></div>
@@ -2152,7 +2191,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.73';
+var APP_VERSION = 'V2-CLUB.74';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3978,7 +4017,7 @@ function _renderClubDashboardMember(d, t, el, opts){
     if(ev.kind === 'audit'){
       var personalActions = {
         transaction_edited: 1, transaction_deleted: 1,
-        fine_issued: 1, fine_paid: 1, fine_cancelled: 1,
+        fine_issued: 1, fine_paid: 1, fine_cancelled: 1, fine_edited: 1,
         reimbursement_issued: 1
       };
       if(personalActions[ev.action] && meName && ev.target_name === meName){
@@ -4027,6 +4066,7 @@ function _renderClubDashboardMember(d, t, el, opts){
             ev.action === 'fine_issued'    ||
             ev.action === 'fine_paid'      ||
             ev.action === 'fine_cancelled' ||
+            ev.action === 'fine_edited'    ||
             ev.action === 'reimbursement_issued')){
         var pa = ev.payload || {};
         return {
@@ -4035,7 +4075,7 @@ function _renderClubDashboardMember(d, t, el, opts){
           at:          ev.at,
           actor:       ev.actor,
           target_name: ev.target_name,
-          amount:      Number(pa.amount || 0),
+          amount:      Number(pa.amount || pa.new_amount || 0),
           description: pa.description || '',
           _audit:      ev
         };
@@ -4117,10 +4157,6 @@ function _renderClubDashboardMember(d, t, el, opts){
         'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
         'Pending</span>';
     } else if(ev.kind === 'audit_event'){
-      // Standalone audit row — fine_issued, fine_paid, fine_cancelled,
-      // reimbursement_issued. Label comes from _auditLabel which
-      // produces the same natural-language string used in the admin
-      // feed ("Fatih issued a $50.00 fine to Martin for ...").
       lbl = _auditLabel(ev._audit);
       if(ev.action === 'fine_issued'){
         sign = '-'; color = '#ff9f0a';
@@ -4128,6 +4164,8 @@ function _renderClubDashboardMember(d, t, el, opts){
         sign = '+'; color = '#30d158';
       } else if(ev.action === 'fine_cancelled'){
         sign = '';  color = 'var(--c-text-3)';
+      } else if(ev.action === 'fine_edited'){
+        sign = '';  color = 'var(--c-text-2)';
       } else if(ev.action === 'reimbursement_issued'){
         sign = '+'; color = '#30d158';
       } else {
@@ -4994,12 +5032,7 @@ function _wireManageUnpaidRows(){
           _refreshAfterUnpaidAction();
         });
       } else if(tag === 'claim-entry-fee'){
-        // Ask the member how they paid (same prompt shape as the
-        // dues + fines claim flows) so the admin sees the payment
-        // method when approving.
-        var efNote = await promptModal(
-          'How did you pay? (cash / zelle / venmo / paypal / other)',
-          { okLabel:'Submit claim' });
+        var efNote = await paymentMethodModal({ title: 'How did you pay?' });
         if(efNote === null){
           btn.disabled = false;
           if(spanEl) spanEl.textContent = origLabel;
@@ -5049,9 +5082,7 @@ function _wireManageUnpaidRows(){
           _refreshAfterUnpaidAction();
         }catch(err){ toast(err.message || 'Could not mark paid', true); }
       } else {
-        var note = await promptModal(
-          'How did you pay? (cash / zelle / venmo / paypal / other)',
-          { okLabel:'Submit claim' });
+        var note = await paymentMethodModal({ title: 'How did you pay?' });
         if(note === null) return;
         try{
           var r = await sb.rpc('submit_fine_payment_claim',
@@ -6233,6 +6264,53 @@ async function openFinesBreakdownModal(forDir){
       '<div class="empty"><div class="empty-title">Could not load</div>'+
       '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
   }
+}
+
+// Chip-based payment method picker. Resolves with a string label
+// (lowercase: cash / zelle / paypal / venmo / <custom>) or null when
+// the user cancels. Used by fine claim + entry-fee claim flows.
+function paymentMethodModal(opts){
+  opts = opts || {};
+  return new Promise(function(resolve){
+    if(opts.title) $('pm-title').textContent = opts.title;
+    else $('pm-title').textContent = 'How did you pay?';
+    var picked = null;
+    var chips = document.querySelectorAll('#modal-pay-method .pm-chip');
+    chips.forEach(function(c){ c.classList.remove('active'); });
+    $('pm-other-input').value = '';
+    $('pm-other-wrap').hidden = true;
+    function selectChip(method){
+      picked = method;
+      chips.forEach(function(c){
+        c.classList.toggle('active', c.dataset.pm === method);
+      });
+      $('pm-other-wrap').hidden = (method !== 'other');
+      if(method === 'other'){
+        setTimeout(function(){ var i = $('pm-other-input'); if(i) i.focus(); }, 80);
+      }
+    }
+    chips.forEach(function(c){
+      c.onclick = function(){ selectChip(c.dataset.pm); };
+    });
+    function cleanup(answer){
+      chips.forEach(function(c){ c.onclick = null; });
+      $('pm-cancel').onclick = null;
+      $('pm-confirm').onclick = null;
+      closeModal('modal-pay-method');
+      resolve(answer);
+    }
+    $('pm-cancel').onclick = function(){ cleanup(null); };
+    $('pm-confirm').onclick = function(){
+      if(!picked){ /* require selection */ return; }
+      if(picked === 'other'){
+        var v = ($('pm-other-input').value || '').trim();
+        cleanup(v || 'other');
+      } else {
+        cleanup(picked);
+      }
+    };
+    openModal('modal-pay-method');
+  });
 }
 
 async function openMemberOutOfPocketModal(){
