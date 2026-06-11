@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.76">
+<meta name="app-version" content="V2-CLUB.77">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2219,7 +2219,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.76';
+var APP_VERSION = 'V2-CLUB.77';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4704,6 +4704,57 @@ function _renderMemberBreakdown(){
     'Expenses you covered personally (not from the pool).'+
   '</div>';
 
+  // REIMBURSEMENTS — collapsible. Title row shows the total in green;
+  // tapping reveals each reimbursement (cash or offset) with the
+  // description so the member sees a complete in/out picture.
+  var rb = d.reimbursements || { total: 0, items: [] };
+  var rbItems = rb.items || [];
+  html +=
+    '<div style="margin-top:18px;">'+
+      '<button type="button" id="mb-rb-toggle" '+
+        'style="width:100%;display:flex;justify-content:space-between;align-items:baseline;'+
+        'background:none;border:none;padding:14px 0 6px;cursor:pointer;text-align:left;'+
+        'border-bottom:1px solid var(--c-border);">'+
+        '<span style="font-size:12px;font-weight:700;color:var(--c-text-3);'+
+          'text-transform:uppercase;letter-spacing:0.5px;">'+
+          'Reimbursements '+
+          '<span id="mb-rb-caret" style="display:inline-block;color:var(--c-text-3);'+
+              'font-weight:400;transition:transform 0.15s;">▸</span>'+
+        '</span>'+
+        '<span style="font-size:15px;font-weight:800;color:#30d158;">'+
+          money(rb.total || 0)+'</span>'+
+      '</button>'+
+      '<div id="mb-rb-body" hidden style="padding:4px 0;">'+
+        (rbItems.length === 0
+          ? '<div style="padding:12px 0;text-align:center;color:var(--c-text-3);font-size:12px;">No reimbursements yet this year.</div>'
+          : rbItems.map(function(r){
+              var label = (r.kind === 'offset') ? 'offset' : 'cash';
+              var pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+                  'padding:1px 6px;border-radius:6px;margin-left:6px;letter-spacing:0.4px;'+
+                  (r.kind === 'offset'
+                    ? 'background:rgba(255,159,10,0.18);color:#ff9f0a;'
+                    : 'background:rgba(48,209,88,0.18);color:#30d158;')+
+                  '">'+label.toUpperCase()+'</span>';
+              var when = r.at ? new Date(r.at).toLocaleDateString(undefined,
+                  {month:'short', day:'numeric', year:'numeric'}) : '';
+              return '<div style="padding:9px 0;border-bottom:0.5px solid var(--c-border);'+
+                  'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+                  '<div style="flex:1;min-width:0;">'+
+                    '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
+                      esc(r.description||'Reimbursement')+pip+
+                    '</div>'+
+                    '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+                      esc(when)+
+                    '</div>'+
+                  '</div>'+
+                  '<div style="font-size:13px;font-weight:700;color:#30d158;white-space:nowrap;">'+
+                    '+'+money(r.amount||0)+
+                  '</div>'+
+                '</div>';
+            }).join(''))+
+      '</div>'+
+    '</div>';
+
   // All-time totals for context.
   html += '<div style="margin-top:18px;padding:12px 14px;background:var(--c-bg);'+
       'border-radius:var(--r);">'+
@@ -4722,6 +4773,18 @@ function _renderMemberBreakdown(){
   '</div>';
 
   $('mb-body').innerHTML = html;
+
+  // Reimbursements collapsible — toggle hidden + rotate caret.
+  var rbToggle = $('mb-rb-toggle');
+  if(rbToggle){
+    rbToggle.onclick = function(){
+      var body = $('mb-rb-body');
+      var caret = $('mb-rb-caret');
+      var open = body.hidden;
+      body.hidden = !open;
+      if(caret) caret.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+    };
+  }
 }
 
 // Helper for the member view's spent row backfill (see hero card).
