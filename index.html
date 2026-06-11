@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.77">
+<meta name="app-version" content="V2-CLUB.78">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2219,7 +2219,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.77';
+var APP_VERSION = 'V2-CLUB.78';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4737,19 +4737,36 @@ function _renderMemberBreakdown(){
                   '">'+label.toUpperCase()+'</span>';
               var when = r.at ? new Date(r.at).toLocaleDateString(undefined,
                   {month:'short', day:'numeric', year:'numeric'}) : '';
-              return '<div style="padding:9px 0;border-bottom:0.5px solid var(--c-border);'+
-                  'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
-                  '<div style="flex:1;min-width:0;">'+
-                    '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
-                      esc(r.description||'Reimbursement')+pip+
+              // Breakdown sub-items (offsets only). Each shows what
+              // settlement category was funded (dues / entry fee /
+              // fine) and how much.
+              var bd = Array.isArray(r.breakdown) ? r.breakdown : [];
+              var bdHtml = '';
+              if(bd.length > 0){
+                bdHtml = '<div style="margin-top:6px;padding-left:10px;border-left:2px solid var(--c-border);">'+
+                  bd.map(function(b){
+                    return '<div style="display:flex;justify-content:space-between;'+
+                        'font-size:11.5px;color:var(--c-text-2);padding:2px 0;">'+
+                        '<span>'+esc(b.label||b.type||'')+'</span>'+
+                        '<span style="font-weight:600;color:var(--c-text);">'+money(b.amount||0)+'</span>'+
+                      '</div>';
+                  }).join('')+'</div>';
+              }
+              return '<div style="padding:9px 0;border-bottom:0.5px solid var(--c-border);">'+
+                  '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+                    '<div style="flex:1;min-width:0;">'+
+                      '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
+                        esc(r.description||'Reimbursement')+pip+
+                      '</div>'+
+                      '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+                        esc(when)+
+                      '</div>'+
                     '</div>'+
-                    '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
-                      esc(when)+
+                    '<div style="font-size:13px;font-weight:700;color:#30d158;white-space:nowrap;">'+
+                      '+'+money(r.amount||0)+
                     '</div>'+
                   '</div>'+
-                  '<div style="font-size:13px;font-weight:700;color:#30d158;white-space:nowrap;">'+
-                    '+'+money(r.amount||0)+
-                  '</div>'+
+                  bdHtml+
                 '</div>';
             }).join(''))+
       '</div>'+
@@ -8570,6 +8587,7 @@ function _renderPoolBreakdown(){
   html += '<div style="margin-top:4px;">'+
     _r('Dues',       money(c.dues      || 0)) +
     _r('Entry fees', money(c.entry_fee || 0)) +
+    _r('Fines',      money(c.fine      || 0)) +
     _r('Donations',  money(c.donation  || 0)) +
     _r('Rentals',    money(c.rental    || 0)) +
   '</div>';
@@ -8581,6 +8599,117 @@ function _renderPoolBreakdown(){
     _r('Out-of-pocket',       money(s.personal || 0),
        'doesn\'t affect pool') +
   '</div>';
+
+  // REIMBURSEMENTS — collapsible: per-member list. Cash/offset pip,
+  // plus the offset breakdown sub-rows.
+  var rb = d.reimbursements || { total: 0, items: [] };
+  var rbItems = rb.items || [];
+  html +=
+    '<div style="margin-top:18px;">'+
+      '<button type="button" id="pb-rb-toggle" '+
+        'style="width:100%;display:flex;justify-content:space-between;align-items:baseline;'+
+        'background:none;border:none;padding:14px 0 6px;cursor:pointer;text-align:left;'+
+        'border-bottom:1px solid var(--c-border);">'+
+        '<span style="font-size:12px;font-weight:700;color:var(--c-text-3);'+
+            'text-transform:uppercase;letter-spacing:0.5px;">'+
+          'Reimbursements '+
+          '<span id="pb-rb-caret" style="display:inline-block;color:var(--c-text-3);'+
+              'font-weight:400;">▸</span>'+
+        '</span>'+
+        '<span style="font-size:15px;font-weight:800;color:#ff453a;">'+
+          money(rb.total || 0)+'</span>'+
+      '</button>'+
+      '<div id="pb-rb-body" hidden style="padding:4px 0;">'+
+        (rbItems.length === 0
+          ? '<div style="padding:12px 0;text-align:center;color:var(--c-text-3);font-size:12px;">No reimbursements this year.</div>'
+          : rbItems.map(function(r){
+              var label = (r.kind === 'offset') ? 'OFFSET' : 'CASH';
+              var pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+                  'padding:1px 6px;border-radius:6px;margin-left:6px;letter-spacing:0.4px;'+
+                  (r.kind === 'offset'
+                    ? 'background:rgba(255,159,10,0.18);color:#ff9f0a;'
+                    : 'background:rgba(48,209,88,0.18);color:#30d158;')+
+                  '">'+label+'</span>';
+              var when = r.at ? new Date(r.at).toLocaleDateString(undefined,
+                  {month:'short', day:'numeric', year:'numeric'}) : '';
+              var bd = Array.isArray(r.breakdown) ? r.breakdown : [];
+              var bdHtml = '';
+              if(bd.length > 0){
+                bdHtml = '<div style="margin-top:6px;padding-left:10px;border-left:2px solid var(--c-border);">'+
+                  bd.map(function(b){
+                    return '<div style="display:flex;justify-content:space-between;'+
+                        'font-size:11.5px;color:var(--c-text-2);padding:2px 0;">'+
+                        '<span>'+esc(b.label||b.type||'')+'</span>'+
+                        '<span style="font-weight:600;color:var(--c-text);">'+money(b.amount||0)+'</span>'+
+                      '</div>';
+                  }).join('')+'</div>';
+              }
+              return '<div style="padding:9px 0;border-bottom:0.5px solid var(--c-border);">'+
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+                  '<div style="flex:1;min-width:0;">'+
+                    '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
+                      esc(r.member_name||'Member')+pip+
+                    '</div>'+
+                    '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+                      esc(r.description||'')+' · '+esc(when)+
+                    '</div>'+
+                  '</div>'+
+                  '<div style="font-size:13px;font-weight:700;color:#ff453a;white-space:nowrap;">'+
+                    money(r.amount||0)+
+                  '</div>'+
+                '</div>'+
+                bdHtml+
+              '</div>';
+            }).join(''))+
+      '</div>'+
+    '</div>';
+
+  // PENDING FINES — collapsible: outstanding fines grouped naturally.
+  var pf = d.pending_fines || { total: 0, items: [] };
+  var pfItems = pf.items || [];
+  html +=
+    '<div style="margin-top:14px;">'+
+      '<button type="button" id="pb-pf-toggle" '+
+        'style="width:100%;display:flex;justify-content:space-between;align-items:baseline;'+
+        'background:none;border:none;padding:14px 0 6px;cursor:pointer;text-align:left;'+
+        'border-bottom:1px solid var(--c-border);">'+
+        '<span style="font-size:12px;font-weight:700;color:var(--c-text-3);'+
+            'text-transform:uppercase;letter-spacing:0.5px;">'+
+          'Pending fines '+
+          '<span id="pb-pf-caret" style="display:inline-block;color:var(--c-text-3);'+
+              'font-weight:400;">▸</span>'+
+        '</span>'+
+        '<span style="font-size:15px;font-weight:800;color:#ff9f0a;">'+
+          money(pf.total || 0)+'</span>'+
+      '</button>'+
+      '<div id="pb-pf-body" hidden style="padding:4px 0;">'+
+        (pfItems.length === 0
+          ? '<div style="padding:12px 0;text-align:center;color:var(--c-text-3);font-size:12px;">All fines settled.</div>'
+          : pfItems.map(function(f){
+              var when = f.issued_at ? new Date(f.issued_at).toLocaleDateString(undefined,
+                  {month:'short', day:'numeric', year:'numeric'}) : '';
+              var carried = f.is_carried
+                ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+                    'padding:1px 6px;border-radius:6px;margin-left:6px;letter-spacing:0.4px;'+
+                    'background:rgba(255,159,10,0.18);color:#ff9f0a;">CARRIED</span>'
+                : '';
+              return '<div style="padding:9px 0;border-bottom:0.5px solid var(--c-border);'+
+                  'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+                  '<div style="flex:1;min-width:0;">'+
+                    '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
+                      esc(f.member_name||'Member')+carried+
+                    '</div>'+
+                    '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+                      esc(f.description||'Fine')+' · '+esc(when)+
+                    '</div>'+
+                  '</div>'+
+                  '<div style="font-size:13px;font-weight:700;color:#ff9f0a;white-space:nowrap;">'+
+                    money(f.amount||0)+
+                  '</div>'+
+                '</div>';
+            }).join(''))+
+      '</div>'+
+    '</div>';
 
   // NET line for the selected year (pool flows only).
   var netColor = (d.net_year >= 0) ? '#30d158' : '#ff453a';
@@ -8610,6 +8739,20 @@ function _renderPoolBreakdown(){
   '</div>';
 
   $('pb-body').innerHTML = html;
+
+  // Reimbursements + Pending Fines collapsibles. Same pattern as the
+  // member modal's reimbursements section.
+  ['pb-rb', 'pb-pf'].forEach(function(prefix){
+    var btn = $(prefix+'-toggle');
+    if(!btn) return;
+    btn.onclick = function(){
+      var body = $(prefix+'-body');
+      var caret = $(prefix+'-caret');
+      var open = body.hidden;
+      body.hidden = !open;
+      if(caret) caret.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+    };
+  });
 }
 
 async function submitMarkDuesPaid(){
