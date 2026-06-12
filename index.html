@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.78">
+<meta name="app-version" content="V2-CLUB.79">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1420,6 +1420,41 @@
   }
 </style>
 
+<!-- Admin: members-owe-pool drill-down. Chip filter switches between
+     by-member, by-period dues, fines list, and entry-fee list. -->
+<div class="modal" id="modal-members-owe" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:88vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Members Owe Pool</div>
+    <div class="modal-body" style="overflow-y:auto;min-height:160px;">
+      <div id="mo-total" style="font-size:22px;font-weight:800;color:#ff9f0a;
+          padding:4px 0 14px;text-align:left;">—</div>
+      <div id="mo-chips" style="display:flex;flex-wrap:wrap;gap:8px;
+          padding-bottom:14px;border-bottom:1px solid var(--c-border);"></div>
+      <div id="mo-body" style="padding-top:12px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="mo-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .mo-chip{
+    background:var(--c-bg); border:1px solid var(--c-border);
+    border-radius:999px; padding:7px 14px; font-size:12.5px; font-weight:600;
+    color:var(--c-text); cursor:pointer; display:inline-flex;
+    align-items:center; gap:6px;
+  }
+  .mo-chip.active{
+    background:var(--c-tint); border-color:var(--c-tint); color:#fff;
+  }
+  .mo-chip .mo-chip-amt{
+    font-weight:800; font-size:11.5px; opacity:0.85;
+  }
+</style>
+
 <!-- Admin: edit fine (description + amount) -->
 <div class="modal" id="modal-edit-fine" hidden>
   <div class="modal-backdrop"></div>
@@ -2219,7 +2254,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.78';
+var APP_VERSION = 'V2-CLUB.79';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -6255,6 +6290,150 @@ async function openClubFinesSummaryModal(){
   }
 }
 
+// Admin Members Owe Pool — opens the unified obligations modal.
+// Uses cached state.membersOwePool when available; otherwise fetches.
+async function openMembersOwePoolModal(){
+  openModal('modal-members-owe');
+  $('mo-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  state.moActiveChip = 'members';
+  var data = state.membersOwePool;
+  if(!data){
+    try{
+      var r = await sb.rpc('get_club_members_owe_pool',
+        { p_trip: state.trip.trip_id });
+      if(r.error) throw r.error;
+      data = r.data;
+      state.membersOwePool = data;
+    }catch(err){
+      $('mo-body').innerHTML =
+        '<div class="empty"><div class="empty-title">Could not load</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+      return;
+    }
+  }
+  _moRender();
+}
+
+function _moRender(){
+  var d = state.membersOwePool || {};
+  var t = d.totals || {};
+  var active = state.moActiveChip || 'members';
+  $('mo-total').textContent = money(t.all || 0);
+
+  // Chips with their totals as small pills.
+  $('mo-chips').innerHTML =
+    _moChip('members',   'Members',    t.all || 0,    active) +
+    _moChip('dues',      'Dues',       t.dues || 0,   active) +
+    _moChip('fines',     'Fines',      t.fines || 0,  active) +
+    _moChip('entry',     'Entry fees', t.entry_fee||0, active);
+
+  $('mo-chips').querySelectorAll('.mo-chip').forEach(function(c){
+    c.onclick = function(){
+      state.moActiveChip = c.dataset.moChip;
+      _moRender();
+    };
+  });
+
+  var html = '';
+  if(active === 'members'){
+    var list = d.by_member || [];
+    if(list.length === 0){
+      html = '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">Nothing outstanding.</div>';
+    } else {
+      list.forEach(function(m){
+        var sub = [];
+        if(Number(m.dues_owed)      > 0) sub.push('Dues '      + money(m.dues_owed));
+        if(Number(m.entry_fee_owed) > 0) sub.push('Entry fee ' + money(m.entry_fee_owed));
+        if(Number(m.fines_owed)     > 0) sub.push('Fines '     + money(m.fines_owed));
+        html +=
+          '<div style="padding:12px 0;border-bottom:0.5px solid var(--c-border);'+
+            'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+            '<div style="flex:1;min-width:0;">'+
+              '<div style="font-size:14px;font-weight:700;color:var(--c-text);">'+
+                esc(m.member_name||'')+'</div>'+
+              '<div style="font-size:11.5px;color:var(--c-text-3);margin-top:2px;">'+
+                esc(sub.join(' · '))+'</div>'+
+            '</div>'+
+            '<div style="font-size:14px;font-weight:800;color:#ff9f0a;white-space:nowrap;">'+
+              money(m.total||0)+'</div>'+
+          '</div>';
+      });
+    }
+  } else if(active === 'dues'){
+    var periods = d.by_period || [];
+    if(periods.length === 0){
+      html = '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">No outstanding dues.</div>';
+    } else {
+      periods.forEach(function(p){
+        html +=
+          '<div style="margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--c-border);'+
+            'display:flex;justify-content:space-between;align-items:baseline;">'+
+            '<span style="font-size:14px;font-weight:700;color:var(--c-text);">'+esc(p.label||'')+'</span>'+
+            '<span style="font-size:13px;font-weight:700;color:#ff9f0a;">'+money(p.total||0)+'</span>'+
+          '</div>';
+        (p.members||[]).forEach(function(mm){
+          html +=
+            '<div style="display:flex;justify-content:space-between;font-size:12.5px;'+
+              'padding:7px 0 7px 4px;border-bottom:0.5px solid var(--c-border);color:var(--c-text-2);">'+
+              '<span>'+esc(mm.member_name||'')+'</span>'+
+              '<span style="font-weight:600;color:var(--c-text);">'+money(mm.amount||0)+'</span>'+
+            '</div>';
+        });
+      });
+    }
+  } else if(active === 'fines'){
+    var fines = d.fines_all || [];
+    if(fines.length === 0){
+      html = '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">No outstanding fines.</div>';
+    } else {
+      fines.forEach(function(f){
+        var when = f.issued_at ? new Date(f.issued_at).toLocaleDateString(undefined,
+            {month:'short', day:'numeric', year:'numeric'}) : '';
+        var carried = f.is_carried
+          ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+              'padding:1px 6px;border-radius:6px;margin-left:6px;letter-spacing:0.4px;'+
+              'background:rgba(255,159,10,0.18);color:#ff9f0a;">CARRIED</span>'
+          : '';
+        html +=
+          '<div style="padding:11px 0;border-bottom:0.5px solid var(--c-border);'+
+            'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+            '<div style="flex:1;min-width:0;">'+
+              '<div style="font-size:13px;color:var(--c-text);font-weight:700;">'+
+                esc(f.member_name||'')+carried+'</div>'+
+              '<div style="font-size:11.5px;color:var(--c-text-3);margin-top:2px;">'+
+                esc(f.description||'Fine')+' · '+esc(when)+'</div>'+
+            '</div>'+
+            '<div style="font-size:13px;font-weight:800;color:#ff453a;white-space:nowrap;">'+
+              money(f.amount||0)+'</div>'+
+          '</div>';
+      });
+    }
+  } else if(active === 'entry'){
+    var ef = d.entry_all || [];
+    if(ef.length === 0){
+      html = '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">All members paid entry fee.</div>';
+    } else {
+      ef.forEach(function(e){
+        html +=
+          '<div style="padding:11px 0;border-bottom:0.5px solid var(--c-border);'+
+            'display:flex;justify-content:space-between;align-items:center;">'+
+            '<span style="font-size:14px;color:var(--c-text);font-weight:600;">'+esc(e.member_name||'')+'</span>'+
+            '<span style="font-size:13px;font-weight:800;color:#ff9f0a;">'+money(e.amount||0)+'</span>'+
+          '</div>';
+      });
+    }
+  }
+  $('mo-body').innerHTML = html;
+}
+
+function _moChip(key, label, amount, active){
+  return '<button type="button" class="mo-chip '+(active===key?'active':'')+'" '+
+    'data-mo-chip="'+esc(key)+'">'+
+    '<span>'+esc(label)+'</span>'+
+    '<span class="mo-chip-amt">'+money(amount||0)+'</span>'+
+  '</button>';
+}
+
 async function openFinesBreakdownModal(forDir){
   openModal('modal-fines-breakdown');
   $('fb-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
@@ -7240,12 +7419,9 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       _statRow('Pool Owes Members', '—',
                { id:'ss-pool-owes', clickable:true,
                  hint:'reimbursements pending' }) +
-      _statRow('Total Fines Pending', '—',
-               { id:'ss-fines-total', clickable:true,
-                 hint:'fines outstanding' }) +
-      _statRow('Over Dues '+esc((d.year||'')+''),
-               money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
-               { hint:'collected of billed' }) +
+      _statRow('Members Owe Pool', '—',
+               { id:'ss-members-owe', clickable:true,
+                 hint:'dues + fines + entry fees' }) +
       _statRow('Pool In ('+esc(selected && selected.label_short || '')+')',
                '+'+money(monthIn), { color:'#30d158', hint:'from pool' }) +
       _statRow('Pool Out ('+esc(selected && selected.label_short || '')+')',
@@ -7492,26 +7668,28 @@ function _renderClubDashboardAdmin(d, t, el, opts){
     });
   }
 
-  // Total Fines Pending — same async pattern as Pool Owes Members.
-  // Hidden when no member has outstanding fines.
-  var finesEl = el.querySelector('#ss-fines-total');
-  if(finesEl){
-    sb.rpc('get_club_fines_summary',
+  // Members Owe Pool — async fetch + click. Sum is dues + fines +
+  // entry fees outstanding (current + past months only).
+  var moEl = el.querySelector('#ss-members-owe');
+  if(moEl){
+    sb.rpc('get_club_members_owe_pool',
       { p_trip: state.trip.trip_id }).then(function(res){
       if(res.error || !res.data) return;
-      var total = Number(res.data.total_pending || 0);
-      var valueDiv = finesEl.querySelector('div:nth-child(2)');
+      // Cache the payload so the modal opens instantly.
+      state.membersOwePool = res.data;
+      var total = Number((res.data.totals && res.data.totals.all) || 0);
+      var valueDiv = moEl.querySelector('div:nth-child(2)');
       if(total > 0.005){
         if(valueDiv){
           valueDiv.innerHTML =
             money(total) +
             '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;">›</span>';
-          valueDiv.style.color = '#ff453a';
+          valueDiv.style.color = '#ff9f0a';
         }
-        finesEl.onclick = openClubFinesSummaryModal;
-        finesEl.style.display = '';
+        moEl.onclick = openMembersOwePoolModal;
+        moEl.style.display = '';
       } else {
-        finesEl.style.display = 'none';
+        moEl.style.display = 'none';
       }
     });
   }
@@ -13261,6 +13439,7 @@ $('se-submit').onclick = submitMemberExpense;
 $('if-cancel').onclick = function(){ closeModal('modal-issue-fine'); };
 $('if-submit').onclick = submitIssueFine;
 $('fb-close').onclick  = function(){ closeModal('modal-fines-breakdown'); };
+$('mo-close').onclick  = function(){ closeModal('modal-members-owe'); };
 $('ef-cancel').onclick = function(){ closeModal('modal-edit-fine'); };
 $('ef-save').onclick = async function(){
   var ctx = state.editFineCtx || {};
