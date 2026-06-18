@@ -1,0 +1,12 @@
+{
+  "name": "sharex",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shared trip-expense tracker (single-page app backed by Supabase).",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
